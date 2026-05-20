@@ -684,7 +684,16 @@ function insertImage() {
 }
 
 // 표 삽입
+let _tableInsertRange = null; // 표 삽입 위치 저장
+
 function showTableModal() {
+  // 모달 열기 전에 현재 커서 위치 저장
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0) {
+    _tableInsertRange = sel.getRangeAt(0).cloneRange();
+  } else {
+    _tableInsertRange = null;
+  }
   showModal(`<h3>📊 표 추가</h3>
     <label style="font-size:13px;color:var(--subtext)">열 수</label>
     <input id="m-cols" type="number" value="3" min="1" max="10"/>
@@ -696,14 +705,11 @@ function confirmInsertTable() {
   const cols = parseInt(document.getElementById('m-cols').value)||3;
   const rows = parseInt(document.getElementById('m-rows').value)||3;
   closeModal();
-  const body = getEditorBody(); body.focus();
-  const sel = window.getSelection();
-  let savedRange = null;
-  if (sel && sel.rangeCount > 0) savedRange = sel.getRangeAt(0).cloneRange();
 
+  const body = getEditorBody();
   const wrap = document.createElement('div');
   wrap.className = 'note-table-wrap';
-  wrap.contentEditable = 'false'; // 표 wrapper는 편집 불가, 셀만 편집
+  wrap.contentEditable = 'false';
 
   const tbl = document.createElement('table');
   tbl.className = 'note-table';
@@ -717,7 +723,6 @@ function confirmInsertTable() {
     tbl.appendChild(tr);
   }
 
-  // 표 조작 툴바
   const toolbar = document.createElement('div');
   toolbar.className = 'table-toolbar';
   toolbar.contentEditable = 'false';
@@ -734,20 +739,31 @@ function confirmInsertTable() {
 
   wrap.appendChild(tbl);
   wrap.appendChild(toolbar);
-
   attachTableEvents(tbl);
   addTableResizeHandle(wrap);
 
-  if (savedRange) { sel.removeAllRanges(); sel.addRange(savedRange); }
-  insertNodeAtCursor(wrap);
+  // 저장된 커서 위치에 삽입
+  const sel = window.getSelection();
+  if (_tableInsertRange && body.contains(_tableInsertRange.commonAncestorContainer)) {
+    sel.removeAllRanges();
+    sel.addRange(_tableInsertRange);
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    range.insertNode(wrap);
+  } else {
+    // 커서 위치 없으면 body 끝에 추가
+    body.appendChild(wrap);
+  }
+  _tableInsertRange = null;
 
-  // wrap 뒤에 빈 p 추가해서 계속 입력 가능하게
+  // wrap 뒤에 빈 p 추가
   const p = document.createElement('p');
   p.innerHTML = '<br>';
   wrap.after(p);
   // 커서를 p로
+  body.focus();
   const r2 = document.createRange();
-  r2.setStart(p,0); r2.collapse(true);
+  r2.setStart(p, 0); r2.collapse(true);
   sel.removeAllRanges(); sel.addRange(r2);
   autoSave();
 }
@@ -1386,64 +1402,131 @@ function makeSubjectExam() {
   saveExamAsPDF([...exams,...answerPages],(sub?.name||'과목')+'_시험지');
 }
 
-async function saveExamAsPDF(pages,filename) {
-  const ld=document.getElementById('exam-loading'), msg=document.getElementById('exam-loading-msg');
+async function saveExamAsPDF(pages, filename) {
+  const ld = document.getElementById('exam-loading'), msg = document.getElementById('exam-loading-msg');
   ld.classList.add('show');
   try {
-    await new Promise(r=>setTimeout(r,50));
-    const {jsPDF}=window.jspdf;
-    const pdf=new jsPDF({orientation:'p',unit:'px',format:'a4'});
-    const pW=pdf.internal.pageSize.getWidth(), pH=pdf.internal.pageSize.getHeight();
-    for(let pi=0;pi<pages.length;pi++) {
-      msg.textContent=`📄 PDF 생성 중... (${pi+1}/${pages.length})`;
-      const cont=document.createElement('div');
-      cont.style.cssText='position:fixed;left:-9999px;top:0;width:800px;background:#fff;z-index:-1;';
-      cont.innerHTML=pages[pi]; document.body.appendChild(cont);
-      await new Promise(r=>setTimeout(r,120));
-      const canvas=await html2canvas(cont,{scale:2,useCORS:true,backgroundColor:'#ffffff',width:800,windowWidth:800});
+    await new Promise(r => setTimeout(r, 50));
+    const {jsPDF} = window.jspdf;
+    const pdf = new jsPDF({orientation:'p', unit:'px', format:'a4'});
+    const pW = pdf.internal.pageSize.getWidth(), pH = pdf.internal.pageSize.getHeight();
+    for (let pi = 0; pi < pages.length; pi++) {
+      msg.textContent = `📄 PDF 생성 중... (${pi+1}/${pages.length})`;
+      const cont = document.createElement('div');
+      cont.style.cssText = 'position:fixed;left:-9999px;top:0;width:800px;background:#fff;z-index:-1;';
+      cont.innerHTML = pages[pi];
+      document.body.appendChild(cont);
+      await new Promise(r => setTimeout(r, 120));
+      const canvas = await html2canvas(cont, {
+        scale: 2, useCORS: true, allowTaint: true,
+        backgroundColor: '#ffffff', width: 800, windowWidth: 800, logging: false,
+        onclone: (doc) => {
+          doc.querySelectorAll('td, th').forEach(cell => {
+            const bg = cell.style.backgroundColor;
+            if (bg && bg !== 'transparent') cell.style.background = bg;
+          });
+          doc.querySelectorAll('mark').forEach(mark => {
+            const bg = mark.style.backgroundColor || '#fff176';
+            mark.style.background = bg;
+          });
+        }
+      });
       document.body.removeChild(cont);
-      const iW=canvas.width,iH=canvas.height,ratio=pW/iW;
-      let yPos=0;
-      while(yPos<iH){
-        const sH=Math.min(pH/ratio,iH-yPos);
-        const sc=document.createElement('canvas'); sc.width=iW; sc.height=sH;
-        const ctx=sc.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,iW,sH);
-        ctx.drawImage(canvas,0,yPos,iW,sH,0,0,iW,sH);
-        if(pi>0||yPos>0) pdf.addPage();
-        pdf.addImage(sc.toDataURL('image/png'),'PNG',0,0,pW,sH*ratio);
-        yPos+=sH;
+      const iW = canvas.width, iH = canvas.height, ratio = pW / iW;
+      let yPos = 0;
+      while (yPos < iH) {
+        const sH = Math.min(pH / ratio, iH - yPos);
+        const sc = document.createElement('canvas'); sc.width = iW; sc.height = sH;
+        const ctx = sc.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, iW, sH);
+        ctx.drawImage(canvas, 0, yPos, iW, sH, 0, 0, iW, sH);
+        if (pi > 0 || yPos > 0) pdf.addPage();
+        pdf.addImage(sc.toDataURL('image/png'), 'PNG', 0, 0, pW, sH * ratio);
+        yPos += sH;
       }
     }
-    pdf.save(filename.replace(/[\/\\?%*:|"<>]/g,'-')+'.pdf');
+    pdf.save(filename.replace(/[\/\\?%*:|"<>]/g, '-') + '.pdf');
     toast('✅ PDF 저장됐어요!');
-  } catch(err) { toast('PDF 오류: '+err.message); console.error(err); }
+  } catch(err) { toast('PDF 오류: ' + err.message); console.error(err); }
   ld.classList.remove('show');
+}
+
+// html2canvas 캡처 전 clone에서 스타일 강제 적용
+function prepareForCapture(sourceEl) {
+  const clone = sourceEl.cloneNode(true);
+  clone.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1;background:#fff;';
+  // contenteditable 제거 (html2canvas가 더 안정적으로 렌더)
+  clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+  // 셀 backgroundColor → background 속성으로 병기
+  clone.querySelectorAll('td, th').forEach(cell => {
+    const bg = cell.style.backgroundColor;
+    if (bg && bg !== 'transparent' && bg !== '') {
+      cell.style.background = bg;
+      cell.setAttribute('bgcolor', bg); // 레거시 fallback
+    }
+  });
+  // mark 태그 배경도 강제
+  clone.querySelectorAll('mark').forEach(mark => {
+    const bg = mark.style.backgroundColor || '#fff176';
+    mark.style.background = bg;
+    mark.style.webkitPrintColorAdjust = 'exact';
+  });
+  // selected-cell 하이라이트 제거
+  clone.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
+  // 툴바/핸들 제거
+  clone.querySelectorAll('.table-toolbar, .col-resize-overlay, .tbl-resize-handle').forEach(el => el.remove());
+  document.body.appendChild(clone);
+  return clone;
 }
 
 async function savePDF() {
   toast('📄 PDF 생성 중...');
-  const toolbars=document.querySelectorAll('.table-toolbar,.col-resize-handle');
-  toolbars.forEach(t=>t.style.visibility='hidden');
-  const paper=document.getElementById('editor-paper');
+  const paper = document.getElementById('editor-paper');
+  const clone = prepareForCapture(paper);
   try {
-    const canvas=await html2canvas(paper,{scale:2,useCORS:true,backgroundColor:'#ffffff'});
-    const {jsPDF}=window.jspdf;
-    const pdf=new jsPDF({orientation:'p',unit:'px',format:'a4'});
-    const pW=pdf.internal.pageSize.getWidth(),pH=pdf.internal.pageSize.getHeight();
-    const iW=canvas.width,iH=canvas.height,ratio=pW/iW;
-    let yPos=0;
-    while(yPos<iH){
-      const sH=Math.min(pH/ratio,iH-yPos);
-      const sc=document.createElement('canvas');sc.width=iW;sc.height=sH;
-      const ctx=sc.getContext('2d');ctx.drawImage(canvas,0,yPos,iW,sH,0,0,iW,sH);
-      if(yPos>0) pdf.addPage();
-      pdf.addImage(sc.toDataURL('image/png'),'PNG',0,0,pW,sH*ratio);
-      yPos+=sH;
+    await new Promise(r => setTimeout(r, 80)); // 렌더 대기
+    const canvas = await html2canvas(clone, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+      onclone: (doc) => {
+        // cloned doc 안에서도 배경색 재적용
+        doc.querySelectorAll('td, th').forEach(cell => {
+          const bg = cell.style.backgroundColor;
+          if (bg && bg !== 'transparent') cell.style.background = bg;
+        });
+        doc.querySelectorAll('mark').forEach(mark => {
+          const bg = mark.style.backgroundColor || '#fff176';
+          mark.style.background = bg;
+        });
+      }
+    });
+    document.body.removeChild(clone);
+    const {jsPDF} = window.jspdf;
+    const pdf = new jsPDF({orientation:'p', unit:'px', format:'a4'});
+    const pW = pdf.internal.pageSize.getWidth(), pH = pdf.internal.pageSize.getHeight();
+    const iW = canvas.width, iH = canvas.height, ratio = pW / iW;
+    let yPos = 0;
+    while (yPos < iH) {
+      const sH = Math.min(pH / ratio, iH - yPos);
+      const sc = document.createElement('canvas'); sc.width = iW; sc.height = sH;
+      const ctx = sc.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, iW, sH);
+      ctx.drawImage(canvas, 0, yPos, iW, sH, 0, 0, iW, sH);
+      if (yPos > 0) pdf.addPage();
+      pdf.addImage(sc.toDataURL('image/png'), 'PNG', 0, 0, pW, sH * ratio);
+      yPos += sH;
     }
-    const title=(document.getElementById('editor-big-title').value||'노트').replace(/[\/\\?%*:|"<>]/g,'-');
-    pdf.save(title+'.pdf'); toast('✅ PDF 저장됐어요!');
-  } catch(err){toast('PDF 오류');console.error(err);}
-  toolbars.forEach(t=>t.style.visibility='');
+    const title = (document.getElementById('editor-big-title').value || '노트').replace(/[\/\\?%*:|"<>]/g, '-');
+    pdf.save(title + '.pdf');
+    toast('✅ PDF 저장됐어요!');
+  } catch(err) {
+    if (document.body.contains(clone)) document.body.removeChild(clone);
+    toast('PDF 오류: ' + err.message);
+    console.error(err);
+  }
 }
 
 // ══════════════════════════════════════════
