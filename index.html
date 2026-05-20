@@ -1475,12 +1475,32 @@ document.addEventListener('DOMContentLoaded',()=>{
   loadState(); buildHighlightSwatches(); renderSidebar(); renderNotesList();
 
   const body=document.getElementById('editor-body');
-  body.addEventListener('input',()=>{
+  body.addEventListener('input', e => {
     // ol/ul 에 클래스 유지
     body.querySelectorAll('ol:not(.note-ol)').forEach(ol=>ol.classList.add('note-ol'));
     body.querySelectorAll('ul:not(.note-ul)').forEach(ul=>ul.classList.add('note-ul'));
     body.querySelectorAll('h1:not(.note-h1)').forEach(h=>h.classList.add('note-h1'));
     body.querySelectorAll('h2:not(.note-h2)').forEach(h=>h.classList.add('note-h2'));
+
+    // * 입력 → · 가운데 점으로 변환
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) { autoSave(); return; }
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+    if (node.nodeType === Node.TEXT_NODE && node.textContent.includes('*')) {
+      const offset = range.startOffset;
+      node.textContent = node.textContent.replace(/\*/g, '·');
+      // 커서 위치 복원
+      try {
+        const newRange = document.createRange();
+        const newOffset = Math.min(offset, node.textContent.length);
+        newRange.setStart(node, newOffset);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+      } catch(err) {}
+    }
+
     autoSave();
   });
 
