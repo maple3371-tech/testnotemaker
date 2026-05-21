@@ -19,7 +19,26 @@
 body { font-family: var(--font-main); background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
 
 /* ── SIDEBAR ── */
-#sidebar { width: 220px; min-width: 220px; background: var(--sidebar-bg); color: #eee; display: flex; flex-direction: column; overflow-y: auto; z-index: 10; }
+#sidebar {
+  width: 220px; min-width: 220px;
+  background: var(--sidebar-bg); color: #eee;
+  display: flex; flex-direction: column; overflow-y: auto; z-index: 10;
+  transition: width 0.22s ease, min-width 0.22s ease, padding 0.22s ease;
+}
+#sidebar.collapsed { width: 0; min-width: 0; overflow: hidden; }
+#sidebar-toggle {
+  position: fixed; left: 220px; top: 50%;
+  transform: translateY(-50%);
+  width: 18px; height: 48px;
+  background: var(--sidebar-bg);
+  border: none; border-radius: 0 8px 8px 0;
+  cursor: pointer; color: rgba(255,255,255,0.6);
+  font-size: 11px; display: flex; align-items: center; justify-content: center;
+  z-index: 100; transition: left 0.22s ease;
+  box-shadow: 2px 0 8px rgba(0,0,0,0.15);
+}
+#sidebar-toggle:hover { color: #fff; background: var(--sidebar-accent); }
+body.sidebar-hidden #sidebar-toggle { left: 0; }
 #sidebar-header { padding: 22px 18px 14px; font-size: 20px; font-weight: 800; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; align-items: center; gap: 8px; }
 #sidebar-header span { color: var(--sidebar-accent); }
 .sidebar-section { padding: 12px 10px 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: rgba(255,255,255,0.35); }
@@ -63,7 +82,7 @@ body { font-family: var(--font-main); background: var(--bg); color: var(--text);
 #empty-state p { font-size: 13px; max-width: 280px; line-height: 1.7; }
 
 /* ── EDITOR VIEW ── */
-#editor-view { flex: 1; display: none; flex-direction: column; overflow: hidden; min-height: 0; }
+#editor-view { flex: 1; display: none; flex-direction: column; min-height: 0; height: 100%; overflow: hidden; }
 
 /* ── EDITOR TOPBAR (블록 추가 버튼들) ── */
 #editor-topbar {
@@ -72,6 +91,7 @@ body { font-family: var(--font-main); background: var(--bg); color: var(--text);
   padding: 7px 14px;
   display: flex; align-items: center; gap: 6px;
   flex-shrink: 0;
+  min-height: 0;
   overflow-x: auto;
   white-space: nowrap;
   scrollbar-width: thin;
@@ -86,6 +106,7 @@ body { font-family: var(--font-main); background: var(--bg); color: var(--text);
   padding: 5px 12px;
   display: flex; align-items: center; gap: 3px;
   flex-shrink: 0;
+  min-height: 0;
   overflow-x: auto;
   white-space: nowrap;
   scrollbar-width: thin;
@@ -265,6 +286,9 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   <button id="add-subject-btn" onclick="openAddSubject()">＋ 과목 추가</button>
   <div id="sidebar-footer">자동 저장 중</div>
 </div>
+
+<!-- SIDEBAR TOGGLE -->
+<button id="sidebar-toggle" onclick="toggleSidebar()" title="사이드바 숨기기/보이기">◀</button>
 
 <!-- MAIN -->
 <div id="main">
@@ -454,6 +478,15 @@ function renderSidebar() {
 
 function filterBySubject(id) {
   state.filterSubject = id;
+  // 에디터가 열려있으면 저장 후 목록으로
+  if (document.getElementById('editor-view').style.display !== 'none') {
+    saveState();
+    state.currentNoteId = null;
+    document.documentElement.style.setProperty('--accent','#e94560');
+    document.getElementById('editor-view').style.display = 'none';
+    document.getElementById('notes-view').style.display = '';
+    document.getElementById('topbar').style.display = '';
+  }
   renderSidebar(); renderNotesList();
   const lbl = document.getElementById('current-subject-label');
   const btn = document.getElementById('subject-exam-btn');
@@ -566,6 +599,14 @@ function openNote(id) {
     addTableResizeHandle(wrap);
   });
   body.focus();
+}
+
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const btn = document.getElementById('sidebar-toggle');
+  sb.classList.toggle('collapsed');
+  document.body.classList.toggle('sidebar-hidden');
+  btn.textContent = sb.classList.contains('collapsed') ? '▶' : '◀';
 }
 
 function applySubjectColor(subId) {
