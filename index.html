@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
 <title>✏️ 스터디노트</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -16,11 +16,22 @@
   --shadow: 0 2px 16px rgba(0,0,0,0.08); --font-main: 'Nanum Gothic', sans-serif;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; max-height: 100vh; overflow: hidden; }
-body { font-family: var(--font-main); background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+html { height: 100%; height: 100dvh; }
+body {
+  font-family: var(--font-main); background: var(--bg); color: var(--text);
+  display: flex;
+  height: 100vh; height: 100dvh;   /* dvh = 크롬 주소창 제외한 실제 높이 */
+  max-height: 100vh; max-height: 100dvh;
+  overflow: hidden;
+}
 
 /* ── MAIN ── */
-#main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; height: 100vh; max-height: 100vh; }
+#main {
+  flex: 1; display: flex; flex-direction: column;
+  overflow: hidden; min-width: 0;
+  height: 100vh; height: 100dvh;
+  max-height: 100vh; max-height: 100dvh;
+}
 
 /* ── EDITOR VIEW ── */
 #editor-view {
@@ -29,7 +40,7 @@ body { font-family: var(--font-main); background: var(--bg); color: var(--text);
   flex-direction: column;
   height: 100%;
   max-height: 100%;
-  overflow: hidden;  /* 이 안에서만 스크롤 */
+  overflow: hidden;
   min-height: 0;
 }
 
@@ -600,7 +611,7 @@ function openNote(id) {
   document.getElementById('notes-view').style.display = 'none';
   document.getElementById('topbar').style.display = 'none';
   const ev = document.getElementById('editor-view');
-  ev.style.cssText = 'display:flex; flex-direction:column; flex:1; height:100%; max-height:100%; overflow:hidden; min-height:0;';
+  ev.style.cssText = 'display:flex !important; flex-direction:column; flex:1; height:100%; max-height:100%; overflow:hidden; min-height:0;';
   document.getElementById('editor-big-title').value = note.title||'';
   document.getElementById('subject-select-editor').value = note.subject||'';
   document.getElementById('editor-date').textContent = new Date(note.updatedAt).toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric'});
