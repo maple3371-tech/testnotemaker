@@ -574,6 +574,7 @@ function createGuideNote() {
 <div class="note-table-wrap" contenteditable="false" style="width:100%"><table class="note-table" style="width:100%"><colgroup><col style="width:35%"><col style="width:65%"></colgroup>
 <tbody>
 <tr><th contenteditable="true">단축키</th><th contenteditable="true">기능</th></tr>
+<tr><td contenteditable="true">Ctrl+Enter</td><td contenteditable="true">현재 페이지 뒤에 새 페이지 추가</td></tr>
 <tr><td contenteditable="true">Ctrl+S</td><td contenteditable="true">저장</td></tr>
 <tr><td contenteditable="true">Ctrl+Z</td><td contenteditable="true">실행 취소</td></tr>
 <tr><td contenteditable="true">Ctrl+Y / Ctrl+Shift+Z</td><td contenteditable="true">다시 실행</td></tr>
@@ -790,9 +791,22 @@ function backToList() {
 //  INSERT ELEMENTS (커서 위치에 삽입)
 // ══════════════════════════════════════════
 function getEditorBody() {
-  // 현재 포커스된 페이지 body 반환, 없으면 첫 번째
+  // 1순위: _savedRange에서 현재 편집 중인 페이지 body 추출
+  if (_savedRange) {
+    let node = _savedRange.commonAncestorContainer;
+    while (node && node !== document.body) {
+      if (node.nodeType === 1 && node.isContentEditable && node.closest('.editor-page')) {
+        return node.closest('[contenteditable="true"]') || node;
+      }
+      node = node.parentNode;
+    }
+  }
+  // 2순위: 현재 포커스된 요소
   const active = document.activeElement;
-  if (active && active.closest('.editor-page')) return active.closest('[contenteditable="true"]') || active;
+  if (active && active.isContentEditable && active.closest('.editor-page')) {
+    return active;
+  }
+  // 3순위: 첫 번째 페이지 body
   return document.getElementById('editor-body') || document.querySelector('.editor-page [contenteditable]');
 }
 
@@ -817,19 +831,16 @@ function insertNodeAtCursor(node) {
 
 function insertH1() {
   restoreSelection();
-  const body = getEditorBody();
-  // selection이 body 안에 없으면 body 끝으로
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || !body.contains(sel.anchorNode)) {
-    body.focus();
-    placeCursorAtEnd(body);
+  if (!sel || sel.rangeCount === 0) {
+    // 커서 없으면 현재 페이지 끝에 추가
+    const body = getEditorBody(); body.focus(); placeCursorAtEnd(body);
   }
   document.execCommand('formatBlock', false, 'h1');
-  // class 부여
   const sel2 = window.getSelection();
   if (sel2 && sel2.anchorNode) {
     let node = sel2.anchorNode;
-    while (node && node !== document.body) {
+    while (node && node !== document.documentElement) {
       if (node.nodeName === 'H1') { node.className = 'note-h1'; break; }
       node = node.parentNode;
     }
@@ -839,17 +850,15 @@ function insertH1() {
 
 function insertH2() {
   restoreSelection();
-  const body = getEditorBody();
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || !body.contains(sel.anchorNode)) {
-    body.focus();
-    placeCursorAtEnd(body);
+  if (!sel || sel.rangeCount === 0) {
+    const body = getEditorBody(); body.focus(); placeCursorAtEnd(body);
   }
   document.execCommand('formatBlock', false, 'h2');
   const sel2 = window.getSelection();
   if (sel2 && sel2.anchorNode) {
     let node = sel2.anchorNode;
-    while (node && node !== document.body) {
+    while (node && node !== document.documentElement) {
       if (node.nodeName === 'H2') { node.className = 'note-h2'; break; }
       node = node.parentNode;
     }
@@ -859,28 +868,22 @@ function insertH2() {
 
 function insertOL() {
   restoreSelection();
-  const body = getEditorBody();
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || !body.contains(sel.anchorNode)) {
-    body.focus(); placeCursorAtEnd(body);
-  }
+  if (!sel || sel.rangeCount === 0) { const body = getEditorBody(); body.focus(); placeCursorAtEnd(body); }
   document.execCommand('insertOrderedList', false, null);
   setTimeout(() => {
-    body.querySelectorAll('ol:not(.note-ol)').forEach(ol => ol.classList.add('note-ol'));
+    document.querySelectorAll('.editor-page ol:not(.note-ol)').forEach(ol => ol.classList.add('note-ol'));
     autoSave();
   }, 50);
 }
 
 function insertUL() {
   restoreSelection();
-  const body = getEditorBody();
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || !body.contains(sel.anchorNode)) {
-    body.focus(); placeCursorAtEnd(body);
-  }
+  if (!sel || sel.rangeCount === 0) { const body = getEditorBody(); body.focus(); placeCursorAtEnd(body); }
   document.execCommand('insertUnorderedList', false, null);
   setTimeout(() => {
-    body.querySelectorAll('ul:not(.note-ul)').forEach(ul => ul.classList.add('note-ul'));
+    document.querySelectorAll('.editor-page ul:not(.note-ul)').forEach(ul => ul.classList.add('note-ul'));
     autoSave();
   }, 50);
 }
@@ -2349,15 +2352,40 @@ document.addEventListener('DOMContentLoaded',()=>{
     }
   });
 
-  // Ctrl+S 저장, Ctrl+Z undo, Ctrl+Y redo, Shift+8 → ×
+  // Ctrl+S 저장, Ctrl+Z undo, Ctrl+Y redo, Shift+8 → ×, Ctrl+Enter → 새 페이지
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey||e.metaKey) && e.key==='s') { e.preventDefault(); saveState(); toast('💾 저장됐어요!'); }
     if ((e.ctrlKey||e.metaKey) && e.key==='z' && !e.shiftKey) { if(document.getElementById('editor-view').style.display!=='none') doUndo(); }
     if ((e.ctrlKey||e.metaKey) && (e.key==='y' || (e.key==='z' && e.shiftKey))) { if(document.getElementById('editor-view').style.display!=='none') doRedo(); }
 
+    // Ctrl+Enter → 현재 페이지 바로 뒤에 새 페이지 추가
+    if ((e.ctrlKey||e.metaKey) && e.key==='Enter') {
+      const inPage = document.activeElement?.closest('.editor-page');
+      if (inPage) {
+        e.preventDefault();
+        const container = document.getElementById('pages-container');
+        const pages = Array.from(container.querySelectorAll('.editor-page'));
+        const curIdx = pages.indexOf(inPage);
+        const newPage = document.createElement('div');
+        newPage.className = 'editor-page';
+        const newBody = makeBodyEl();
+        newPage.appendChild(newBody);
+        // 현재 페이지 바로 뒤에 삽입
+        if (pages[curIdx + 1]) {
+          container.insertBefore(newPage, pages[curIdx + 1]);
+        } else {
+          container.appendChild(newPage);
+        }
+        updatePageNumbers();
+        newBody.focus();
+        setTimeout(() => newPage.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+        toast('새 페이지 추가됐어요');
+      }
+    }
+
     // Shift+8 → · 가운데 점, Ctrl+8 → × 곱하기
     const active = document.activeElement;
-    const inEditor = active && (active.id==='editor-body' || active.closest('.note-table-wrap'));
+    const inEditor = active && (active.closest('.editor-page') || active.closest('.note-table-wrap'));
     if (inEditor && !e.metaKey) {
       if (e.shiftKey && !e.ctrlKey && e.code==='Digit8') {
         e.preventDefault();
