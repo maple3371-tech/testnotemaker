@@ -2378,12 +2378,121 @@ document.addEventListener('DOMContentLoaded',()=>{
     if (!sel || sel.rangeCount === 0) return;
     const node = sel.anchorNode;
     if (!node) return;
-    // editor-page 안에 있을 때만 저장
     const page = node.nodeType === 1 ? node.closest?.('.editor-page') : node.parentElement?.closest?.('.editor-page');
-    if (page) {
-      _savedRange = sel.getRangeAt(0).cloneRange();
-    }
+    if (page) { _savedRange = sel.getRangeAt(0).cloneRange(); }
   });
+
+  // ── 페이지 간 / 표 앞뒤 화살표 이동 ──────────────
+  document.addEventListener('keydown', e => {
+    // 에디터 내 contenteditable 포커스일 때만
+    const active = document.activeElement;
+    const inEditorPage = active && active.isContentEditable && active.closest('.editor-page');
+    const inTableCell = active && (active.nodeName === 'TD' || active.nodeName === 'TH');
+    if (!inEditorPage && !inTableCell) return;
+    if (e.ctrlKey || e.metaKey || e.shiftKey) return; // 수식어 키 있으면 패스
+
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+
+    // ── ↓ : 현재 페이지 마지막 줄 → 다음 페이지 첫 줄
+    if (e.key === 'ArrowDown' && !inTableCell) {
+      const body = active;
+      const page = body.closest('.editor-page');
+      if (!page) return;
+      // 커서가 body의 마지막 줄에 있는지 확인
+      const range = sel.getRangeAt(0);
+      const rangeRect = range.getBoundingClientRect();
+      const bodyRect = body.getBoundingClientRect();
+      const isLastLine = rangeRect.bottom >= bodyRect.bottom - 30;
+      if (isLastLine) {
+        const pages = Array.from(document.querySelectorAll('.editor-page'));
+        const curIdx = pages.indexOf(page);
+        if (curIdx < pages.length - 1) {
+          e.preventDefault();
+          const nextBody = pages[curIdx + 1].querySelector('[contenteditable]');
+          if (nextBody) {
+            nextBody.focus();
+            // 다음 페이지 첫 줄로 커서
+            const r = document.createRange();
+            r.setStart(nextBody, 0);
+            r.collapse(true);
+            sel.removeAllRanges(); sel.addRange(r);
+            pages[curIdx + 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+        }
+      }
+    }
+
+    // ── ↑ : 현재 페이지 첫 줄 → 이전 페이지 마지막 줄
+    if (e.key === 'ArrowUp' && !inTableCell) {
+      const body = active;
+      const page = body.closest('.editor-page');
+      if (!page) return;
+      const range = sel.getRangeAt(0);
+      const rangeRect = range.getBoundingClientRect();
+      const bodyRect = body.getBoundingClientRect();
+      const isFirstLine = rangeRect.top <= bodyRect.top + 30;
+      if (isFirstLine) {
+        const pages = Array.from(document.querySelectorAll('.editor-page'));
+        const curIdx = pages.indexOf(page);
+        if (curIdx > 0) {
+          e.preventDefault();
+          const prevBody = pages[curIdx - 1].querySelector('[contenteditable]');
+          if (prevBody) {
+            prevBody.focus();
+            placeCursorAtEnd(prevBody);
+            pages[curIdx - 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+        }
+      }
+    }
+
+    // ── → : 표 뒤 텍스트로 이동 (커서가 표 바로 앞 / 텍스트 끝에서)
+    if (e.key === 'ArrowRight' && !inTableCell) {
+      const body = active;
+      if (!isCursorAtTextEnd(body)) return;
+      // body 끝 다음 형제가 표 wrap인지 확인
+      // (표는 body 밖 editor-page에 있으므로, body 다음 형제 탐색)
+      // 실제로는 표가 body 안에 있음 - 표 wrap 다음 텍스트로 이동
+      const range = sel.getRangeAt(0);
+      const container = range.endContainer;
+      // 표 직전 노드에서 → 누르면 표의 첫 셀로
+      let next = container.nextSibling || container.parentNode?.nextSibling;
+      while (next) {
+        if (next.nodeType === 1 && next.classList?.contains('note-table-wrap')) {
+          e.preventDefault();
+          const firstCell = next.querySelector('th, td');
+          if (firstCell) { firstCell.focus(); placeCursorAtStart(firstCell); }
+          return;
+        }
+        next = next.nextSibling;
+      }
+    }
+
+    // ── ← : 표 앞 텍스트로 이동
+    if (e.key === 'ArrowLeft' && !inTableCell) {
+      const body = active;
+      const range = sel.getRangeAt(0);
+      // 커서가 body 맨 앞에 있고, 앞에 표가 있으면 표 마지막 셀로
+      const isStart = range.startOffset === 0 &&
+        (!range.startContainer.previousSibling) &&
+        (range.startContainer === body || range.startContainer.parentNode === body);
+      if (isStart) {
+        // body 이전 형제에서 표 wrap 탐색
+        let prev = body.previousSibling || body.parentNode?.previousSibling;
+        while (prev) {
+          if (prev.nodeType === 1 && prev.classList?.contains('note-table-wrap')) {
+            e.preventDefault();
+            const cells = prev.querySelectorAll('td, th');
+            const lastCell = cells[cells.length - 1];
+            if (lastCell) { lastCell.focus(); placeCursorAtEnd(lastCell); }
+            return;
+          }
+          prev = prev.previousSibling;
+        }
+      }
+    }
+  }, true); // capture phase로 표 셀 keydown보다 먼저 처리
 
   // Ctrl+S 저장, Ctrl+Z undo, Ctrl+Y redo, Shift+8 → ×, Ctrl+Enter → 새 페이지
   document.addEventListener('keydown', e => {
