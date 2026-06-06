@@ -613,7 +613,25 @@ let state = {
 function loadState() {
   try {
     const s = localStorage.getItem('studynote_v5');
-    if (s) { const p = JSON.parse(s); state.subjects = p.subjects||state.subjects; state.notes = p.notes||[]; }
+    if (s) {
+      const p = JSON.parse(s);
+      state.subjects = p.subjects || state.subjects;
+      state.notes = p.notes || [];
+
+      // 기존 저장 데이터에 UI 핸들이 포함돼 있으면 제거
+      state.notes.forEach(note => {
+        if (note.html) {
+          const tmp = document.createElement('div');
+          tmp.innerHTML = note.html;
+          tmp.querySelectorAll([
+            '.tbl-drag-handle', '.tbl-resize-handle', '.tbl-row-resize-handle',
+            '.col-resize-overlay', '.table-toolbar', '.tbl-drop-line'
+          ].join(',')).forEach(el => el.remove());
+          tmp.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
+          note.html = tmp.innerHTML;
+        }
+      });
+    }
   } catch(e) {}
   // 첫 실행 시 가이드 노트 자동 생성
   if (state.notes.length === 0) {
@@ -1907,14 +1925,37 @@ function deleteAllPages() {
 function getAllHtml() {
   const pages = document.querySelectorAll('.editor-page [contenteditable]');
   return Array.from(pages).map(b => {
-    // 저장 전 표 셀의 불필요한 wrapper div 정리
     const clone = b.cloneNode(true);
+
+    // ── UI 요소 전부 제거 (저장에 포함되면 안 되는 것들) ──
+    clone.querySelectorAll([
+      '.tbl-drag-handle',
+      '.tbl-resize-handle',
+      '.tbl-row-resize-handle',
+      '.col-resize-overlay',
+      '.table-toolbar',
+      '.tbl-drop-line',
+      '.selected-cell-marker'
+    ].join(',')).forEach(el => el.remove());
+
+    // selected-cell 클래스 제거
+    clone.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
+
+    // 표 셀의 불필요한 단일 wrapper div 정리
     clone.querySelectorAll('td, th').forEach(cell => {
-      // 셀 안이 <div>하나뿐이면 언래핑
-      if (cell.children.length === 1 && cell.firstElementChild.tagName === 'DIV' && !cell.firstElementChild.className) {
+      if (cell.children.length === 1 &&
+          cell.firstElementChild.tagName === 'DIV' &&
+          !cell.firstElementChild.className &&
+          !cell.firstElementChild.id) {
         cell.innerHTML = cell.firstElementChild.innerHTML;
       }
     });
+
+    // note-table-wrap의 contenteditable 속성 제거 (false로 저장 방지)
+    clone.querySelectorAll('.note-table-wrap').forEach(w => {
+      w.removeAttribute('contenteditable');
+    });
+
     return clone.innerHTML;
   }).join('<hr class="page-break" style="border:none;margin:0;page-break-after:always;">');
 }
@@ -1930,8 +1971,14 @@ function restorePages(html) {
     const body = makeBodyEl();
     body.id = i === 0 ? 'editor-body' : '';
     body.innerHTML = part || '';
+
+    // 혹시 이전 버전에서 저장된 UI 잔재 제거
+    body.querySelectorAll('.tbl-drag-handle, .tbl-resize-handle, .tbl-row-resize-handle, .col-resize-overlay, .table-toolbar, .tbl-drop-line').forEach(el => el.remove());
+    body.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
+
     page.appendChild(body);
     container.appendChild(page);
+
     // 표 이벤트 재연결
     body.querySelectorAll('.note-table').forEach(tbl => {
       tbl.querySelectorAll('.col-resize-overlay').forEach(h => h.remove());
@@ -1939,16 +1986,7 @@ function restorePages(html) {
       attachTableEvents(tbl);
     });
     body.querySelectorAll('.note-table-wrap').forEach(wrap => {
-      wrap.querySelectorAll('.tbl-resize-handle').forEach(h => h.remove());
       addTableResizeHandle(wrap);
-      // 드래그 핸들 재연결
-      wrap.querySelectorAll('.tbl-drag-handle').forEach(h => h.remove());
-      const dh = document.createElement('div');
-      dh.className = 'tbl-drag-handle';
-      dh.innerHTML = '⠿ 표 이동';
-      dh.contentEditable = 'false';
-      wrap.appendChild(dh);
-      attachTableDragHandle(dh, wrap);
     });
   });
   updatePageNumbers();
@@ -3420,6 +3458,11 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
 
   setInterval(saveState, 30000);
+
+  // F5/탭 닫기 직전 저장
+  window.addEventListener('beforeunload', () => {
+    saveState();
+  });
 });
 </script>
 </body>
