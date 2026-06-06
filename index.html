@@ -583,8 +583,8 @@ function createGuideNote() {
 </tbody></table><div class="table-toolbar" contenteditable="false"></div></div>
 
 <h2 class="note-h2">📋 시험지 만들기</h2>
-<p>백틱( <code style="background:#f0f0f0;padding:1px 6px;border-radius:4px;font-family:monospace;font-size:13px;color:#c0392b">&#96;</code> )으로 감싼 단어가 시험지에서 빈칸으로 바뀌어요. 키보드 숫자 1 왼쪽 키예요.</p>
-<p>예) 수도는 <code style="background:#fff8e1;padding:1px 6px;border-radius:4px;font-family:monospace;font-size:13px;color:#e67e22">&#96;서울&#96;</code>이다 → 수도는 ______①이다</p>
+<p>백틱( \` )으로 감싼 단어가 시험지에서 빈칸으로 바뀌어요. 키보드 숫자 1 왼쪽 키예요.</p>
+<p>예) 수도는 \`서울\`이다 → 수도는 ______①이다</p>
 <p>시험지 PDF에는 빈칸 문제지 + 번호별 정답지가 함께 저장돼요.</p>
 
 <h2 class="note-h2">🖼️ 기타 기능</h2>
@@ -2087,6 +2087,10 @@ async function saveExamAsPDF(examHTMLList, filename) {
       doc.querySelectorAll('mark').forEach(mark => {
         mark.style.background = mark.style.backgroundColor || '#fff176';
       });
+      doc.querySelectorAll(
+        '.table-toolbar, .col-resize-overlay, .tbl-resize-handle, .tbl-row-resize-handle, .tbl-btn'
+      ).forEach(el => el.remove());
+      doc.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
     };
 
     for (let ei = 0; ei < examHTMLList.length; ei++) {
@@ -2112,16 +2116,17 @@ async function saveExamAsPDF(examHTMLList, filename) {
         // 캡처된 높이가 A4보다 크면 자르되, 요소 단위 분할로 거의 안 잘림
         let yPos = 0;
         while (yPos < iH) {
-          const sH = Math.min(pH / ratio, iH - yPos);
+          const sliceH = Math.min(pH / ratio, iH - yPos);
+          if (sliceH <= 0) break;
           const sc = document.createElement('canvas');
-          sc.width = iW; sc.height = sH;
+          sc.width = iW; sc.height = Math.ceil(sliceH);
           const ctx = sc.getContext('2d');
-          ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, iW, sH);
-          ctx.drawImage(canvas, 0, yPos, iW, sH, 0, 0, iW, sH);
+          ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, iW, sc.height);
+          ctx.drawImage(canvas, 0, yPos, iW, sliceH, 0, 0, iW, sc.height);
           if (!firstPage) pdf.addPage();
           firstPage = false;
-          pdf.addImage(sc.toDataURL('image/png'), 'PNG', 0, 0, pW, sH * ratio);
-          yPos += sH;
+          pdf.addImage(sc.toDataURL('image/png'), 'PNG', 0, 0, pW, sliceH * ratio);
+          yPos += sliceH;
         }
       }
     }
@@ -2180,11 +2185,11 @@ async function savePDF() {
         mark.style.background = mark.style.backgroundColor || '#fff176';
       });
       doc.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
-      doc.querySelectorAll('.table-toolbar,.col-resize-overlay,.tbl-resize-handle,.selected-cell').forEach(el => {
-        if (el.classList.contains('selected-cell')) el.classList.remove('selected-cell');
-        else el.remove();
-      });
-      // 페이지 번호 숨기기 (after 가상요소는 캡처에 포함되므로 data-page 제거)
+      // 모든 UI 핸들/툴바 제거
+      doc.querySelectorAll(
+        '.table-toolbar, .col-resize-overlay, .tbl-resize-handle, .tbl-row-resize-handle, .tbl-btn'
+      ).forEach(el => el.remove());
+      doc.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
       doc.querySelectorAll('.editor-page').forEach(p => p.removeAttribute('data-page'));
     };
 
@@ -2192,11 +2197,10 @@ async function savePDF() {
       msg.textContent = `📄 PDF 생성 중... (${i+1}/${pages.length})`;
       const page = pages[i];
 
-      // 페이지 clone을 고정 너비로 렌더
       const clone = page.cloneNode(true);
       clone.style.cssText = `position:fixed;left:-9999px;top:0;width:794px;min-height:1123px;background:#fff;padding:52px 60px;box-sizing:border-box;z-index:-1;`;
       document.body.appendChild(clone);
-      await new Promise(r => setTimeout(r, 80));
+      await new Promise(r => setTimeout(r, 100));
 
       const canvas = await html2canvas(clone, {
         scale: 2, useCORS: true, allowTaint: true,
@@ -2208,15 +2212,15 @@ async function savePDF() {
 
       const iW = canvas.width, iH = canvas.height;
       const ratio = pW / iW;
-      // 한 페이지가 A4보다 길면 잘라서 여러 PDF 페이지에
       let yPos = 0;
       while (yPos < iH) {
         const sliceH = Math.min(pH / ratio, iH - yPos);
+        if (sliceH <= 0) break;
         const sc = document.createElement('canvas');
-        sc.width = iW; sc.height = sliceH;
+        sc.width = iW; sc.height = Math.ceil(sliceH);
         const ctx = sc.getContext('2d');
-        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, iW, sliceH);
-        ctx.drawImage(canvas, 0, yPos, iW, sliceH, 0, 0, iW, sliceH);
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, iW, sc.height);
+        ctx.drawImage(canvas, 0, yPos, iW, sliceH, 0, 0, iW, sc.height);
         if (i > 0 || yPos > 0) pdf.addPage();
         pdf.addImage(sc.toDataURL('image/png'), 'PNG', 0, 0, pW, sliceH * ratio);
         yPos += sliceH;
