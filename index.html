@@ -1791,26 +1791,37 @@ function makePaperClone(extraStyle) {
 async function captureAndSlice(el, pdf, pW, isFirst) {
   document.body.appendChild(el);
   await new Promise(r => setTimeout(r, 120));
+
   const canvas = await html2canvas(el, {
-    scale:2, useCORS:true, allowTaint:true, backgroundColor:'#ffffff',
-    width:794, windowWidth:794, logging:false
+    scale: 2, useCORS: true, allowTaint: true,
+    backgroundColor: '#ffffff',
+    width: 794, windowWidth: 794, logging: false
   });
   document.body.removeChild(el);
-  const iW = canvas.width, iH = canvas.height;
-  const ratio = pW / iW;
-  const sliceH = PAGE_H * 2; // scale=2 기준 A4 높이
+
+  const iW    = canvas.width;                              // 794*2 = 1588
+  const iH    = canvas.height;
+  const pH    = pdf.internal.pageSize.getHeight();         // jsPDF A4 정확값 (≈1122.52px)
+  const ratio = pW / iW;                                   // ≈ 0.4998
+  // 한 PDF 페이지에 정확히 채워지는 캔버스 픽셀 수
+  // pH / ratio = pH * iW / pW  (floating point 오차 최소화)
+  const sliceH = Math.round(pH * iW / pW);
+
   let yPos = 0, pageNum = 0;
-  while (yPos < iH) {
-    const sH = Math.min(sliceH, iH - yPos);
-    if (sH <= 0) break;
-    const sc = document.createElement('canvas');
-    sc.width = iW; sc.height = sH;
+  while (yPos < iH - 1) {
+    const sH  = Math.min(sliceH, iH - yPos);
+    const sc  = document.createElement('canvas');
+    sc.width  = iW;
+    sc.height = Math.ceil(sH);
     const ctx = sc.getContext('2d');
-    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,iW,sH);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, iW, sc.height);
     ctx.drawImage(canvas, 0, yPos, iW, sH, 0, 0, iW, sH);
     if (!isFirst || pageNum > 0) pdf.addPage();
-    pdf.addImage(sc.toDataURL('image/png'), 'PNG', 0, 0, pW, sH * ratio);
-    yPos += sliceH; pageNum++;
+    // PDF에 정확히 A4 한 페이지를 채움
+    pdf.addImage(sc.toDataURL('image/png'), 'PNG', 0, 0, pW, Math.min(pH, sH * ratio));
+    yPos += sliceH;
+    pageNum++;
   }
 }
 
@@ -1914,20 +1925,7 @@ async function buildAndSaveExamPDF(html, filename) {
       msg.textContent = '📄 정답지 생성 중...';
       const ansPages = buildAnswerPages(filename, answers, 794, PAGE_H);
       for (const ansDiv of ansPages) {
-        ansDiv.style.cssText += ';position:fixed;left:-9999px;top:0;z-index:-1;';
-        document.body.appendChild(ansDiv);
-        await new Promise(r => setTimeout(r, 80));
-        const ac = await html2canvas(ansDiv, {
-          scale:2, useCORS:true, allowTaint:true, backgroundColor:'#ffffff',
-          width:794, windowWidth:794, logging:false
-        });
-        document.body.removeChild(ansDiv);
-        pdf.addPage();
-        const sH2 = Math.min(PAGE_H*2, ac.height);
-        const sc2 = document.createElement('canvas');
-        sc2.width=ac.width; sc2.height=sH2;
-        sc2.getContext('2d').drawImage(ac, 0, 0, ac.width, sH2, 0, 0, ac.width, sH2);
-        pdf.addImage(sc2.toDataURL('image/png'), 'PNG', 0, 0, pW, sH2*(pW/ac.width));
+        await captureAndSlice(ansDiv, pdf, pW, false);
       }
     }
 
@@ -1949,7 +1947,8 @@ function buildAnswerPages(title, answers, A4_W, A4_H) {
     const isFirst = start === 0;
     const div = document.createElement('div');
     div.style.cssText = [
-      `width:${A4_W}px`, `height:${A4_H}px`,
+      'position:fixed', 'left:-9999px', 'top:0', 'z-index:-1',
+      `width:794px`,
       `box-sizing:border-box`, `padding:${PAD_Y}px ${PAD_X}px`,
       `background:#fff`, `font-family:'Nanum Gothic',sans-serif`,
       `font-size:13px`, `line-height:1.7`, `color:#2d2d2d`
@@ -2036,6 +2035,23 @@ function buildHighlightSwatches() {
 
 // editor-body input 이벤트 — 자동 저장 + ol/ul 클래스 유지
 document.addEventListener('DOMContentLoaded',()=>{
+  // jsPDF 실제 A4 높이로 CSS 구분선 정확히 맞추기
+  try {
+    const _p = new window.jspdf.jsPDF({unit:'px', format:'a4'});
+    const _pH = _p.internal.pageSize.getHeight(); // ≈1122.52
+    const _pW = _p.internal.pageSize.getWidth();  // ≈793.70
+    // 캔버스(scale=2, 794px)에서 한 페이지 = pH * (794*2) / pW px
+    // 에디터에서 한 페이지 = 그 절반
+    const exactPageH = Math.round(_pH * 794 / _pW); // ≈1123
+    document.documentElement.style.setProperty('--page-h', exactPageH + 'px');
+    // 저장해 두기
+    window._PDF_PAGE_H = exactPageH;
+    window._PDF_PAGE_W = Math.round(_pW);
+  } catch(e) {
+    window._PDF_PAGE_H = 1123;
+    window._PDF_PAGE_W = 794;
+  }
+
   loadState(); buildHighlightSwatches(); renderSidebar(); renderNotesList();
 
   // 첫 페이지 body에 input 핸들러 연결
