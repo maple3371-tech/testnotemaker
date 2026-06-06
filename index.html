@@ -217,7 +217,7 @@ input.tool-color { width: 28px; height: 28px; border-radius: 6px; border: 1px so
 }
 
 /* 실제 편집 영역 */
-#editor-body {
+#editor-body, .editor-page > [contenteditable] {
   outline: none;
   font-size: 14.5px;
   line-height: 1.9;
@@ -816,46 +816,71 @@ function insertNodeAtCursor(node) {
 }
 
 function insertH1() {
-  const body = getEditorBody(); body.focus();
+  restoreSelection();
+  const body = getEditorBody();
+  // selection이 body 안에 없으면 body 끝으로
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !body.contains(sel.anchorNode)) {
+    body.focus();
+    placeCursorAtEnd(body);
+  }
   document.execCommand('formatBlock', false, 'h1');
   // class 부여
-  const sel = window.getSelection();
-  if (sel && sel.anchorNode) {
-    let node = sel.anchorNode;
-    while (node && node !== body) {
+  const sel2 = window.getSelection();
+  if (sel2 && sel2.anchorNode) {
+    let node = sel2.anchorNode;
+    while (node && node !== document.body) {
       if (node.nodeName === 'H1') { node.className = 'note-h1'; break; }
       node = node.parentNode;
     }
   }
   autoSave();
 }
+
 function insertH2() {
-  const body = getEditorBody(); body.focus();
-  document.execCommand('formatBlock', false, 'h2');
+  restoreSelection();
+  const body = getEditorBody();
   const sel = window.getSelection();
-  if (sel && sel.anchorNode) {
-    let node = sel.anchorNode;
-    while (node && node !== body) {
+  if (!sel || sel.rangeCount === 0 || !body.contains(sel.anchorNode)) {
+    body.focus();
+    placeCursorAtEnd(body);
+  }
+  document.execCommand('formatBlock', false, 'h2');
+  const sel2 = window.getSelection();
+  if (sel2 && sel2.anchorNode) {
+    let node = sel2.anchorNode;
+    while (node && node !== document.body) {
       if (node.nodeName === 'H2') { node.className = 'note-h2'; break; }
       node = node.parentNode;
     }
   }
   autoSave();
 }
+
 function insertOL() {
-  const body = getEditorBody(); body.focus();
+  restoreSelection();
+  const body = getEditorBody();
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !body.contains(sel.anchorNode)) {
+    body.focus(); placeCursorAtEnd(body);
+  }
   document.execCommand('insertOrderedList', false, null);
-  // note-ol 클래스
-  setTimeout(()=>{
-    body.querySelectorAll('ol:not(.note-ol)').forEach(ol=>ol.classList.add('note-ol'));
+  setTimeout(() => {
+    body.querySelectorAll('ol:not(.note-ol)').forEach(ol => ol.classList.add('note-ol'));
     autoSave();
   }, 50);
 }
+
 function insertUL() {
-  const body = getEditorBody(); body.focus();
+  restoreSelection();
+  const body = getEditorBody();
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !body.contains(sel.anchorNode)) {
+    body.focus(); placeCursorAtEnd(body);
+  }
   document.execCommand('insertUnorderedList', false, null);
-  setTimeout(()=>{
-    body.querySelectorAll('ul:not(.note-ul)').forEach(ul=>ul.classList.add('note-ul'));
+  setTimeout(() => {
+    body.querySelectorAll('ul:not(.note-ul)').forEach(ul => ul.classList.add('note-ul'));
     autoSave();
   }, 50);
 }
@@ -1309,35 +1334,74 @@ const PAGE_PAD_Y = 52; // 상하 패딩
 const PAGE_CONTENT_H = PAGE_H - PAGE_PAD_Y * 2; // 실제 내용 높이 ~1019px
 
 function checkAndSplitPages() {
-  const body = document.getElementById('editor-body');
+  // onEditorInput의 e.target (현재 편집 중인 body)을 사용
+  // _currentInputBody에 저장된 값 사용
+  const body = _currentInputBody || document.querySelector('.editor-page [contenteditable]');
   if (!body) return;
-  const page = body.closest('.editor-page');
-  if (!page) return;
 
-  // 현재 페이지 내용이 넘치면 새 페이지 추가
-  if (body.scrollHeight > PAGE_CONTENT_H + 20) {
-    const container = document.getElementById('pages-container');
-    const pages = container.querySelectorAll('.editor-page');
-    const lastPage = pages[pages.length - 1];
-    const lastBody = lastPage.querySelector('[contenteditable]');
+  // 현재 body가 페이지 높이를 초과했는지 확인
+  if (body.scrollHeight <= PAGE_CONTENT_H + 10) {
+    updatePageNumbers();
+    return;
+  }
 
-    // 이미 다음 페이지가 있으면 패스, 없으면 추가
-    if (lastBody && lastBody.scrollHeight > PAGE_CONTENT_H + 20) {
-      addNewPage();
+  // 넘친 경우: 현재 페이지 뒤에 새 페이지 추가하고 마지막 블록 이동
+  const currentPage = body.closest('.editor-page');
+  const container = document.getElementById('pages-container');
+  const pages = Array.from(container.querySelectorAll('.editor-page'));
+  const currentIdx = pages.indexOf(currentPage);
+
+  // 다음 페이지가 이미 있으면 그쪽으로, 없으면 새로 만들기
+  let nextPage = pages[currentIdx + 1] || null;
+  let nextBody;
+  if (!nextPage) {
+    nextPage = document.createElement('div');
+    nextPage.className = 'editor-page';
+    nextBody = makeBodyEl();
+    nextPage.appendChild(nextBody);
+    // 현재 페이지 바로 뒤에 삽입
+    currentPage.after(nextPage);
+    addTableResizeHandle && nextPage.querySelectorAll('.note-table-wrap').forEach(w => addTableResizeHandle(w));
+  } else {
+    nextBody = nextPage.querySelector('[contenteditable]');
+  }
+
+  // 현재 body의 마지막 자식 요소를 다음 페이지 맨 앞으로 이동
+  const lastChild = body.lastElementChild || body.lastChild;
+  if (lastChild && lastChild !== body) {
+    // 커서가 마지막 요소 안에 있으면 함께 이동
+    const sel = window.getSelection();
+    const cursorInLast = sel && sel.rangeCount > 0 && lastChild.contains && lastChild.contains(sel.anchorNode);
+
+    nextBody.insertBefore(lastChild, nextBody.firstChild);
+
+    if (cursorInLast) {
+      nextBody.focus();
+      placeCursorAtEnd(nextBody);
+      // 페이지 스크롤
+      setTimeout(() => nextPage.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
     }
   }
+
   updatePageNumbers();
+}
+
+let _currentInputBody = null;
+
+function makeBodyEl() {
+  const b = document.createElement('div');
+  b.contentEditable = 'true';
+  b.spellcheck = false;
+  b.style.cssText = 'outline:none;font-size:14.5px;line-height:1.9;font-family:var(--font-main);color:var(--text);min-height:' + PAGE_CONTENT_H + 'px;word-break:break-word;width:100%;';
+  b.addEventListener('input', onEditorInput);
+  return b;
 }
 
 function addNewPage() {
   const container = document.getElementById('pages-container');
   const newPage = document.createElement('div');
   newPage.className = 'editor-page';
-  const newBody = document.createElement('div');
-  newBody.contentEditable = 'true';
-  newBody.spellcheck = false;
-  newBody.style.cssText = 'outline:none;font-size:14.5px;line-height:1.9;font-family:var(--font-main);color:var(--text);min-height:' + PAGE_CONTENT_H + 'px;word-break:break-word;width:100%;';
-  newBody.addEventListener('input', onEditorInput);
+  const newBody = makeBodyEl();
   newPage.appendChild(newBody);
   container.appendChild(newPage);
   updatePageNumbers();
@@ -1433,11 +1497,8 @@ function deleteAllPages() {
   // 빈 첫 페이지 생성
   const page = document.createElement('div');
   page.className = 'editor-page';
-  const body = document.createElement('div');
-  body.contentEditable = 'true'; body.spellcheck = false;
+  const body = makeBodyEl();
   body.id = 'editor-body';
-  body.style.cssText = `outline:none;font-size:14.5px;line-height:1.9;font-family:var(--font-main);color:var(--text);min-height:${PAGE_CONTENT_H}px;word-break:break-word;width:100%;`;
-  body.addEventListener('input', onEditorInput);
   page.appendChild(body);
   container.appendChild(page);
   updatePageNumbers();
@@ -1460,13 +1521,9 @@ function restorePages(html) {
   parts.forEach((part, i) => {
     const page = document.createElement('div');
     page.className = 'editor-page';
-    const body = document.createElement('div');
-    body.contentEditable = 'true';
-    body.spellcheck = false;
+    const body = makeBodyEl();
     body.id = i === 0 ? 'editor-body' : '';
-    body.style.cssText = 'outline:none;font-size:14.5px;line-height:1.9;font-family:var(--font-main);color:var(--text);min-height:' + PAGE_CONTENT_H + 'px;word-break:break-word;width:100%;';
     body.innerHTML = part || '';
-    body.addEventListener('input', onEditorInput);
     page.appendChild(body);
     container.appendChild(page);
     // 표 이벤트 재연결
@@ -1486,6 +1543,7 @@ function restorePages(html) {
 // 에디터 input 공통 핸들러
 function onEditorInput(e) {
   const body = e.target;
+  _currentInputBody = body; // checkAndSplitPages에서 사용
   // ol/ul 클래스 유지
   body.querySelectorAll('ol:not(.note-ol)').forEach(ol => ol.classList.add('note-ol'));
   body.querySelectorAll('ul:not(.note-ul)').forEach(ul => ul.classList.add('note-ul'));
@@ -2276,6 +2334,19 @@ document.addEventListener('DOMContentLoaded',()=>{
     let activePage = 0;
     pages.forEach((p, i) => { if (p.offsetTop <= scrollMid) activePage = i; });
     updatePageIndicator(activePage);
+  });
+
+  // 에디터 body 커서 이동 시 _savedRange 갱신
+  document.addEventListener('selectionchange', () => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const node = sel.anchorNode;
+    if (!node) return;
+    // editor-page 안에 있을 때만 저장
+    const page = node.nodeType === 1 ? node.closest?.('.editor-page') : node.parentElement?.closest?.('.editor-page');
+    if (page) {
+      _savedRange = sel.getRangeAt(0).cloneRange();
+    }
   });
 
   // Ctrl+S 저장, Ctrl+Z undo, Ctrl+Y redo, Shift+8 → ×
