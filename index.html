@@ -1250,6 +1250,232 @@ function deselectTable() {
   hideTableContextToolbar();
 }
 
+function showTableContextToolbar(wrap) {
+  const toolbar = document.getElementById('table-context-toolbar');
+  if (!toolbar) return;
+  toolbar.classList.add('visible');
+  toolbar._currentWrap = wrap;
+}
+
+function hideTableContextToolbar() {
+  const toolbar = document.getElementById('table-context-toolbar');
+  if (!toolbar) return;
+  toolbar.classList.remove('visible');
+  toolbar._currentWrap = null;
+}
+
+function tblCtxAction(action) {
+  const toolbar = document.getElementById('table-context-toolbar');
+  const wrap = toolbar?._currentWrap || _selectedTableWrap;
+  if (!wrap) { toast('표를 먼저 선택하세요'); return; }
+
+  // tbl* 함수들은 btn 인자로 wrap을 찾으므로 wrap 안의 더미 버튼 전달
+  const dummyBtn = wrap.querySelector('td,th') || wrap;
+  dummyBtn.closest = dummyBtn.closest || (() => wrap);
+
+  // wrap을 직접 넘기는 방식으로 호출
+  switch (action) {
+    case 'addRow':    tblAddRowWrap(wrap); break;
+    case 'delRow':    tblDelRowWrap(wrap); break;
+    case 'addCol':    tblAddColWrap(wrap); break;
+    case 'delCol':    tblDelColWrap(wrap); break;
+    case 'merge':     tblMergeWrap(wrap); break;
+    case 'split':     tblSplitWrap(wrap); break;
+    case 'equalRows': tblEqualRowsWrap(wrap); break;
+    case 'equalCols': tblEqualColsWrap(wrap); break;
+    case 'insertImg': tblInsertImgWrap(wrap); break;
+    case 'deleteTable':
+      if (confirm('표를 삭제할까요?')) { wrap.remove(); hideTableContextToolbar(); autoSave(); toast('표를 삭제했어요'); }
+      break;
+  }
+}
+
+// wrap을 직접 받는 tbl* 래퍼 함수들
+function tblAddRowWrap(wrap) {
+  const tbl = wrap.querySelector('.note-table'); if (!tbl) return;
+  tblSnapshot(wrap);
+  const cols = tbl.rows[0]?.cells.length || 3;
+  const tr = document.createElement('tr');
+  for (let c = 0; c < cols; c++) { const td = document.createElement('td'); td.contentEditable='true'; tr.appendChild(td); }
+  tbl.appendChild(tr); attachTableEvents(tbl); autoSave();
+}
+function tblDelRowWrap(wrap) {
+  const tbl = wrap.querySelector('.note-table'); if (!tbl) return;
+  if (tbl.rows.length <= 1) { toast('행이 1개라 삭제 불가'); return; }
+  tblSnapshot(wrap); tbl.deleteRow(tbl.rows.length - 1); autoSave();
+}
+function tblAddColWrap(wrap) {
+  const tbl = wrap.querySelector('.note-table'); if (!tbl) return;
+  tblSnapshot(wrap);
+  let colgroup = tbl.querySelector('colgroup');
+  if (colgroup) {
+    const existing = colgroup.querySelectorAll('col').length;
+    const pct = (100 / (existing + 1)).toFixed(2) + '%';
+    colgroup.querySelectorAll('col').forEach(c => c.style.width = pct);
+    const col = document.createElement('col'); col.style.width = pct; colgroup.appendChild(col);
+  }
+  Array.from(tbl.rows).forEach((row, i) => {
+    const c = i === 0 ? document.createElement('th') : document.createElement('td');
+    c.contentEditable = 'true'; row.appendChild(c);
+  });
+  attachTableEvents(tbl); autoSave();
+}
+function tblDelColWrap(wrap) {
+  const tbl = wrap.querySelector('.note-table'); if (!tbl) return;
+  if (tbl.rows[0]?.cells.length <= 1) { toast('열이 1개라 삭제 불가'); return; }
+  tblSnapshot(wrap);
+  const colgroup = tbl.querySelector('colgroup');
+  if (colgroup) {
+    const cols = colgroup.querySelectorAll('col');
+    if (cols.length) cols[cols.length-1].remove();
+    const remaining = colgroup.querySelectorAll('col').length;
+    if (remaining) { const pct = (100/remaining).toFixed(2)+'%'; colgroup.querySelectorAll('col').forEach(c=>c.style.width=pct); }
+  }
+  Array.from(tbl.rows).forEach(row => { if (row.cells.length > 0) row.deleteCell(row.cells.length-1); });
+  rebuildColLines(tbl); autoSave();
+}
+function tblMergeWrap(wrap) {
+  const cells = Array.from(wrap.querySelectorAll('.selected-cell'));
+  if (cells.length < 2) { toast('Ctrl+클릭으로 셀 2개 이상 선택'); return; }
+  tblSnapshot(wrap);
+
+  const tbl = wrap.querySelector('.note-table');
+
+  // 선택된 셀들의 row/col 인덱스 수집
+  const positions = cells.map(cell => ({
+    cell,
+    row: cell.parentElement.rowIndex,
+    col: cell.cellIndex
+  }));
+
+  const rows = [...new Set(positions.map(p => p.row))].sort((a,b)=>a-b);
+  const cols = [...new Set(positions.map(p => p.col))].sort((a,b)=>a-b);
+
+  const isHorizontal = rows.length === 1;   // 같은 행 → 가로 병합
+  const isVertical   = cols.length === 1;   // 같은 열 → 세로 병합
+
+  const combined = cells.map(c => c.innerHTML).filter(h => h.trim()).join(' ');
+  const first = positions[0].cell;
+  first.innerHTML = combined || '';
+  first.classList.remove('selected-cell');
+
+  if (isHorizontal) {
+    // 가로 병합: colSpan
+    first.colSpan = cols.length;
+    first.removeAttribute('rowspan');
+    for (let i = 1; i < cells.length; i++) cells[i].remove();
+
+  } else if (isVertical) {
+    // 세로 병합: rowSpan — 첫 번째 셀에 rowSpan 설정, 나머지 행에서 해당 셀 제거
+    first.rowSpan = rows.length;
+    first.removeAttribute('colspan');
+    for (let i = 1; i < cells.length; i++) cells[i].remove();
+
+  } else {
+    // 사각형 범위 병합 (가로 + 세로)
+    first.colSpan = cols.length;
+    first.rowSpan = rows.length;
+    for (let i = 1; i < cells.length; i++) cells[i].remove();
+  }
+
+  _selCells = [];
+  if (tbl) rebuildColLines(tbl);
+  autoSave(); toast('병합됐어요!');
+}
+function tblSplitWrap(wrap) {
+  const selected = wrap.querySelectorAll('.selected-cell');
+  if (!selected.length) { toast('Ctrl+클릭으로 병합된 셀을 선택하세요'); return; }
+  let didSplit = false;
+  tblSnapshot(wrap);
+
+  selected.forEach(cell => {
+    const cSpan = parseInt(cell.colSpan) || 1;
+    const rSpan = parseInt(cell.rowSpan) || 1;
+    if (cSpan < 2 && rSpan < 2) return;
+
+    const row = cell.parentElement;
+    const rowIdx = row.rowIndex;
+    const colIdx = cell.cellIndex;
+
+    cell.colSpan = 1;
+    cell.rowSpan = 1;
+    cell.classList.remove('selected-cell');
+
+    // 가로 분할: 같은 행에 셀 추가
+    for (let c = 1; c < cSpan; c++) {
+      const nc = document.createElement('td');
+      nc.contentEditable = 'true';
+      row.insertBefore(nc, cell.nextSibling);
+    }
+
+    // 세로 분할: 아래 행들에 셀 추가
+    const tbl = wrap.querySelector('.note-table');
+    for (let r = 1; r < rSpan; r++) {
+      const targetRow = tbl.rows[rowIdx + r];
+      if (!targetRow) continue;
+      for (let c = 0; c < cSpan; c++) {
+        const nc = document.createElement('td');
+        nc.contentEditable = 'true';
+        // colIdx 위치에 삽입
+        const refCell = targetRow.cells[colIdx + c] || null;
+        targetRow.insertBefore(nc, refCell);
+      }
+    }
+
+    didSplit = true;
+  });
+
+  if (!didSplit) { toast('병합된 셀을 선택하세요'); return; }
+  _selCells = [];
+
+  const tbl = wrap.querySelector('.note-table');
+  if (tbl) {
+    tbl.querySelectorAll('td,th').forEach(c => c._ev = false);
+    attachTableEvents(tbl);
+  }
+  autoSave(); toast('분할됐어요!');
+}
+function tblEqualRowsWrap(wrap) {
+  const tbl=wrap.querySelector('.note-table'); if(!tbl) return;
+  tblSnapshot(wrap);
+  const selInTable=(_selCells||[]).filter(c=>wrap.contains(c));
+  const targetRows = selInTable.length>0
+    ? Array.from(tbl.rows).filter((_,i)=>new Set(selInTable.map(c=>c.parentElement.rowIndex)).has(i))
+    : Array.from(tbl.rows);
+  targetRows.forEach(row=>Array.from(row.cells).forEach(cell=>{cell.style.height='';cell.style.minHeight='';}));
+  void tbl.offsetHeight;
+  const maxH=Math.max(...targetRows.map(r=>r.offsetHeight));
+  targetRows.forEach(row=>Array.from(row.cells).forEach(cell=>{cell.style.minHeight=maxH+'px';cell.style.height=maxH+'px';}));
+  autoSave(); toast('행 높이를 균등하게 맞췄어요');
+}
+function tblEqualColsWrap(wrap) {
+  const tbl=wrap.querySelector('.note-table'); if(!tbl) return;
+  tblSnapshot(wrap);
+  const colgroup=tbl.querySelector('colgroup');
+  if(colgroup){const cnt=colgroup.querySelectorAll('col').length;if(cnt>0){const pct=(100/cnt).toFixed(2)+'%';colgroup.querySelectorAll('col').forEach(c=>c.style.width=pct);}}
+  rebuildColLines(tbl); autoSave(); toast('열 너비를 균등하게 맞췄어요');
+}
+function tblInsertImgWrap(wrap) {
+  const cell=(wrap.contains(_lastFocusedCell)?_lastFocusedCell:null)||wrap.querySelector('.selected-cell')||wrap.querySelector('td,th');
+  if(!cell){toast('셀을 먼저 클릭하세요');return;}
+  const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.style.display='none';document.body.appendChild(inp);
+  inp.onchange=e=>{
+    const file=e.target.files[0];if(!file){inp.remove();return;}
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const imgWrap=document.createElement('span');imgWrap.style.cssText='display:inline-block;position:relative;';
+      const img=document.createElement('img');img.src=ev.target.result;img.style.cssText='max-width:100%;border-radius:6px;border:1px solid var(--border);display:block;margin-top:4px';
+      const delBtn=document.createElement('button');delBtn.textContent='✕';delBtn.title='이미지 삭제';
+      delBtn.style.cssText='position:absolute;top:6px;right:2px;background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer;opacity:0;transition:opacity 0.15s;display:flex;align-items:center;justify-content:center;padding:0;';
+      delBtn.addEventListener('click',e2=>{e2.preventDefault();e2.stopPropagation();imgWrap.remove();autoSave();toast('이미지 삭제됐어요');});
+      imgWrap.addEventListener('mouseenter',()=>delBtn.style.opacity='1');
+      imgWrap.addEventListener('mouseleave',()=>delBtn.style.opacity='0');
+      imgWrap.appendChild(img);imgWrap.appendChild(delBtn);cell.appendChild(imgWrap);
+      inp.remove();autoSave();toast('이미지 삽입됐어요!');
+    };reader.readAsDataURL(file);
+  };inp.click();
+}
+
 // 표 드래그 핸들에 이벤트 연결
 function attachTableDragHandle(handle, wrap) {
   handle.addEventListener('mousedown', e => {
@@ -2033,18 +2259,471 @@ function isCursorAtLastLine(cell) { const sel=window.getSelection();if(!sel||!se
 function isCursorAtTextEnd(el) { const sel=window.getSelection();if(!sel||!sel.rangeCount)return false;const r=sel.getRangeAt(0),er=document.createRange();er.selectNodeContents(el);er.collapse(false);return r.compareBoundaryPoints(Range.END_TO_END,er)>=0; }
 
 function buildHighlightSwatches() {
-  const row=document.getElementById('highlight-swatches');
-  HL_COLORS.forEach(c=>{
-    const d=document.createElement('div');
-    d.className='color-swatch'+(c==='transparent'?' hl-remove':'');
-    if(c!=='transparent') d.style.background=c;
-    d.title=c==='transparent'?'형광펜 제거':c;
-    d.onclick=()=>applyHighlight(c);
+  const row = document.getElementById('highlight-swatches');
+  HL_COLORS.forEach(c => {
+    const d = document.createElement('div');
+    d.className = 'color-swatch' + (c === 'transparent' ? ' hl-remove' : '');
+    if (c !== 'transparent') d.style.background = c;
+    d.title = c === 'transparent' ? '형광펜 제거' : c;
+
+    // mousedown에서 selection 저장 + focus 이동 방지
+    d.addEventListener('mousedown', e => {
+      e.preventDefault(); // focus가 스와치로 이동하는 것 방지
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+        _hlRange = sel.getRangeAt(0).cloneRange();
+      }
+      _savedSelCells = [...(_selCells || [])];
+    });
+
+    d.addEventListener('click', e => {
+      e.preventDefault();
+      applyHighlight(c);
+    });
+
     row.appendChild(d);
   });
 }
 
 // editor-body input 이벤트 — 자동 저장 + ol/ul 클래스 유지
+
+// ── 서식/표 관련 전역 변수 ──
+let _hlRange = null;
+let _savedSelCells = [];
+
+// 툴바 mousedown 시 selection + selCells 스냅샷 저장
+document.addEventListener('mousedown', e => {
+  if (!e.target || !e.target.closest) return;
+  const inToolbar = e.target.closest('#editor-toolbar, #editor-topbar');
+  if (inToolbar) {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) _savedRange = sel.getRangeAt(0).cloneRange();
+    _savedSelCells = [...(_selCells||[])];
+    // 툴바 클릭시 에디터 focus가 날아가지 않도록 방지
+    // (input, select 제외 — 직접 포커스 필요)
+    if (!['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) {
+      e.preventDefault();
+    }
+  }
+  if (e.target.closest && e.target.closest('#highlight-swatches')) {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && !sel.isCollapsed) _hlRange = sel.getRangeAt(0).cloneRange();
+    _savedSelCells = [...(_selCells||[])];
+  }
+}, true);
+
+
+function doUndo() {
+  // 표 셀 안에 있으면 표 undo 스택 사용
+  const active = document.activeElement;
+  const wrap = active?.closest?.('.note-table-wrap');
+  if (wrap) { tblUndoAction(wrap); return; }
+  document.getElementById('editor-body').focus();
+  document.execCommand('undo', false, null);
+  autoSave();
+}
+
+function doRedo() {
+  const active = document.activeElement;
+  const wrap = active?.closest?.('.note-table-wrap');
+  if (wrap) { tblRedoAction(wrap); return; }
+  document.getElementById('editor-body').focus();
+  document.execCommand('redo', false, null);
+  autoSave();
+}
+
+function getTbl(btn) { return btn.closest('.note-table-wrap').querySelector('.note-table'); }
+
+function tblAddRow(btn) {
+  const tbl=getTbl(btn), cols=tbl.rows[0]?.cells.length||3;
+  const tr=document.createElement('tr');
+  for(let c=0;c<cols;c++){const td=document.createElement('td');td.contentEditable='true';tr.appendChild(td);}
+  tbl.appendChild(tr); attachTableEvents(tbl); autoSave();
+}
+
+function tblDelRow(btn) {
+  const tbl=getTbl(btn);
+  if(tbl.rows.length>1){tbl.deleteRow(tbl.rows.length-1);autoSave();}else toast('행이 1개라 삭제 불가');
+}
+
+function tblAddCol(btn) {
+  const tbl=getTbl(btn);
+  Array.from(tbl.rows).forEach((row,i)=>{ const c=i===0?document.createElement('th'):document.createElement('td'); c.contentEditable='true'; row.appendChild(c); });
+  attachTableEvents(tbl); autoSave();
+}
+
+function tblDelCol(btn) {
+  const tbl=getTbl(btn);
+  if(tbl.rows[0]?.cells.length>1){Array.from(tbl.rows).forEach(r=>{if(r.cells.length>0)r.deleteCell(r.cells.length-1);});autoSave();}else toast('열이 1개라 삭제 불가');
+}
+
+function tblMerge(btn) {
+  const wrap = btn.closest('.note-table-wrap');
+  const tbl = wrap.querySelector('.note-table');
+  const cells = wrap.querySelectorAll('.selected-cell');
+  if (cells.length < 2) { toast('Ctrl+클릭으로 셀 2개 이상 선택'); return; }
+  tblSnapshot(wrap);
+  const combined = Array.from(cells).map(c => c.innerHTML).filter(h => h.trim()).join(' ');
+  const first = cells[0];
+  first.innerHTML = combined || '';
+  first.colSpan = cells.length;
+  first.classList.remove('selected-cell');
+  for (let i = 1; i < cells.length; i++) cells[i].remove();
+  _selCells = [];
+  const colgroup = tbl.querySelector('colgroup');
+  if (colgroup) {
+    const remaining = tbl.rows[0]?.cells.length || 1;
+    const pct = (100 / remaining).toFixed(2) + '%';
+    while (colgroup.children.length > remaining) colgroup.lastChild.remove();
+    while (colgroup.children.length < remaining) { const c = document.createElement('col'); c.style.width = pct; colgroup.appendChild(c); }
+    colgroup.querySelectorAll('col').forEach(c => c.style.width = pct);
+  }
+  rebuildColLines(tbl);
+  autoSave(); toast('병합됐어요!');
+}
+
+function tblSplit(btn) {
+  const wrap = btn.closest('.note-table-wrap');
+  const tbl = wrap.querySelector('.note-table');
+  const selected = wrap.querySelectorAll('.selected-cell');
+  if (!selected.length) { toast('Ctrl+클릭으로 병합된 셀을 선택하세요'); return; }
+  let didSplit = false;
+  tblSnapshot(wrap);
+  selected.forEach(cell => {
+    const span = parseInt(cell.colSpan) || 1;
+    if (span < 2) return;
+    cell.colSpan = 1;
+    const row = cell.parentElement;
+    for (let i = 1; i < span; i++) {
+      const nc = document.createElement('td');
+      nc.contentEditable = 'true';
+      row.insertBefore(nc, cell.nextSibling);
+    }
+    cell.classList.remove('selected-cell');
+    didSplit = true;
+  });
+  if (!didSplit) { toast('colSpan 2 이상인 셀을 선택하세요'); return; }
+  _selCells = [];
+  const firstRow = tbl.rows[0];
+  if (firstRow) {
+    let colgroup = tbl.querySelector('colgroup');
+    if (!colgroup) { colgroup = document.createElement('colgroup'); tbl.prepend(colgroup); }
+    const cnt = firstRow.cells.length;
+    colgroup.innerHTML = '';
+    const pct = (100 / cnt).toFixed(2) + '%';
+    for (let i = 0; i < cnt; i++) { const c = document.createElement('col'); c.style.width = pct; colgroup.appendChild(c); }
+  }
+  tbl.querySelectorAll('td,th').forEach(c => c._ev = false);
+  attachTableEvents(tbl);
+  autoSave(); toast('분할됐어요!');
+}
+
+function tblEqualRows(btn) {
+  const wrap = btn.closest('.note-table-wrap');
+  const tbl = wrap.querySelector('.note-table');
+  if (!tbl) return;
+  tblSnapshot(wrap);
+  const selInTable = _selCells.filter(c => wrap.contains(c));
+  let targetRows;
+  if (selInTable.length > 0) {
+    const rowIdxSet = new Set(selInTable.map(c => c.parentElement.rowIndex));
+    targetRows = Array.from(tbl.rows).filter((_, i) => rowIdxSet.has(i));
+    toast(rowIdxSet.size + '개 행 높이 균등 적용');
+  } else {
+    targetRows = Array.from(tbl.rows);
+    toast('전체 행 높이 균등 적용');
+  }
+  if (!targetRows.length) return;
+  targetRows.forEach(row => Array.from(row.cells).forEach(cell => { cell.style.height = ''; cell.style.minHeight = ''; }));
+  void tbl.offsetHeight;
+  const maxH = Math.max(...targetRows.map(row => row.offsetHeight));
+  targetRows.forEach(row => {
+    Array.from(row.cells).forEach(cell => {
+      cell.style.minHeight = maxH + 'px';
+      cell.style.height = maxH + 'px';
+    });
+  });
+  autoSave();
+}
+
+function tblInsertImg(btn) {
+  const wrap = btn.closest('.note-table-wrap');
+  const cell = (wrap.contains(_lastFocusedCell) ? _lastFocusedCell : null)
+    || wrap.querySelector('.selected-cell')
+    || wrap.querySelector('td,th');
+  if (!cell) { toast('셀을 먼저 클릭하세요'); return; }
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*'; inp.style.display = 'none';
+  document.body.appendChild(inp);
+  inp.onchange = e => {
+    const file = e.target.files[0]; if (!file) { inp.remove(); return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const imgWrap = document.createElement('span');
+      imgWrap.style.cssText = 'display:inline-block;position:relative;';
+      const img = document.createElement('img');
+      img.src = ev.target.result;
+      img.style.cssText = 'max-width:100%;border-radius:6px;border:1px solid var(--border);display:block;margin-top:4px';
+      const delBtn = document.createElement('button');
+      delBtn.textContent = '\u2715';
+      delBtn.title = '이미지 삭제';
+      delBtn.style.cssText = 'position:absolute;top:6px;right:2px;background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0;opacity:0;transition:opacity 0.15s;';
+      delBtn.addEventListener('click', e2 => { e2.preventDefault(); e2.stopPropagation(); imgWrap.remove(); autoSave(); toast('이미지 삭제됐어요'); });
+      imgWrap.addEventListener('mouseenter', () => delBtn.style.opacity = '1');
+      imgWrap.addEventListener('mouseleave', () => delBtn.style.opacity = '0');
+      imgWrap.appendChild(img); imgWrap.appendChild(delBtn);
+      cell.appendChild(imgWrap);
+      cell.classList.remove('selected-cell');
+      _selCells = _selCells.filter(c => c !== cell);
+      inp.remove(); autoSave(); toast('이미지 삽입됐어요!');
+    };
+    reader.readAsDataURL(file);
+  };
+  inp.click();
+}
+
+function fmt(cmd) {
+  if (_savedSelCells.length > 0) {
+    _savedSelCells.forEach(cell => {
+      cell.focus();
+      const r = document.createRange();
+      r.selectNodeContents(cell);
+      const s = window.getSelection();
+      s.removeAllRanges(); s.addRange(r);
+      document.execCommand(cmd, false, null);
+    });
+    autoSave(); return;
+  }
+  focusAndRestoreSelection() || (() => { const b = getEditorBody(); b.focus(); })();
+  document.execCommand(cmd, false, null);
+  autoSave();
+}
+
+function applyFont(font) {
+  if (_savedSelCells.length > 0) {
+    _savedSelCells.forEach(cell => { cell.style.fontFamily = font; });
+    autoSave(); return;
+  }
+  focusAndRestoreSelection();
+  const sel = window.getSelection();
+  let inCell = false;
+  if (sel && sel.anchorNode) {
+    let node = sel.anchorNode;
+    while (node && node !== document.body) {
+      if ((node.nodeName === 'TD' || node.nodeName === 'TH') && node.isContentEditable) { node.focus(); inCell = true; break; }
+      node = node.parentNode;
+    }
+  }
+  if (!inCell) document.getElementById('editor-body').focus();
+  const sel2 = window.getSelection();
+  if (!sel2 || sel2.rangeCount === 0 || sel2.isCollapsed) {
+    if (!inCell) document.getElementById('editor-body').style.fontFamily = font;
+    autoSave(); return;
+  }
+  const range = sel2.getRangeAt(0);
+  try {
+    const frag = range.extractContents();
+    function stripFont(node) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        if (node.style) node.style.fontFamily = '';
+        if (node.getAttribute && node.getAttribute('face')) node.removeAttribute('face');
+        Array.from(node.childNodes).forEach(stripFont);
+      }
+    }
+    stripFont(frag);
+    const span = document.createElement('span');
+    span.style.fontFamily = font;
+    span.appendChild(frag);
+    range.insertNode(span);
+    const nr = document.createRange();
+    nr.setStartAfter(span); nr.collapse(true);
+    sel2.removeAllRanges(); sel2.addRange(nr);
+  } catch(e) {
+    document.execCommand('styleWithCSS', false, true);
+    document.execCommand('fontName', false, font);
+  }
+  autoSave();
+}
+
+function applyFontSize(size) {
+  if (_savedSelCells.length > 0) {
+    _savedSelCells.forEach(cell => { cell.style.fontSize = size; });
+    autoSave(); return;
+  }
+  focusAndRestoreSelection();
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed && sel.rangeCount) {
+    const range = sel.getRangeAt(0);
+    try {
+      const frag = range.extractContents();
+      function stripSize(node) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          if (node.style) node.style.fontSize = '';
+          Array.from(node.childNodes).forEach(stripSize);
+        }
+      }
+      stripSize(frag);
+      const span = document.createElement('span');
+      span.style.fontSize = size;
+      span.appendChild(frag);
+      range.insertNode(span);
+      const nr = document.createRange();
+      nr.setStartAfter(span); nr.collapse(true);
+      sel.removeAllRanges(); sel.addRange(nr);
+    } catch(e) {
+      const span = document.createElement('span');
+      span.style.fontSize = size;
+      try { range.surroundContents(span); } catch(e2) {}
+    }
+  }
+  autoSave();
+}
+
+function applyTextColor(color) {
+  if (_savedSelCells.length > 0) {
+    _savedSelCells.forEach(cell => { cell.style.color = color; });
+    autoSave(); return;
+  }
+  focusAndRestoreSelection();
+  const sel = window.getSelection();
+  if (sel && sel.anchorNode) {
+    let node = sel.anchorNode;
+    while (node && node !== document.body) {
+      if ((node.nodeName === 'TD' || node.nodeName === 'TH') && node.isContentEditable) { node.focus(); break; }
+      node = node.parentNode;
+    }
+  }
+  document.execCommand('styleWithCSS', false, true);
+  document.execCommand('foreColor', false, color);
+  autoSave();
+}
+
+function applyAlign(dir) {
+  if (_savedSelCells.length > 0) {
+    _savedSelCells.forEach(cell => { cell.style.textAlign = dir; });
+    ['l','c','r','j'].forEach(k=>{ const b=document.getElementById('aln-'+k); if(b) b.classList.remove('active'); });
+    const km={left:'l',center:'c',right:'r',justify:'j'};
+    const btn=document.getElementById('aln-'+km[dir]); if(btn) btn.classList.add('active');
+    autoSave(); return;
+  }
+  // savedRange에서 셀 찾기
+  const body = getEditorBody();
+  let cellTarget = null;
+  if (_savedRange) {
+    let node = _savedRange.commonAncestorContainer;
+    while (node && node !== document.body) {
+      if (node.nodeName === 'TD' || node.nodeName === 'TH') { cellTarget = node; break; }
+      node = node.parentNode;
+    }
+  }
+  if (!cellTarget) {
+    // 현재 selection에서도 찾기
+    const sel = window.getSelection();
+    if (sel && sel.anchorNode) {
+      let node = sel.anchorNode;
+      while (node && node !== document.body) {
+        if (node.nodeName === 'TD' || node.nodeName === 'TH') { cellTarget = node; break; }
+        node = node.parentNode;
+      }
+    }
+  }
+  if (cellTarget) {
+    cellTarget.style.textAlign = dir;
+  } else {
+    focusAndRestoreSelection();
+    body.focus();
+    const cmds = {left:'justifyLeft',center:'justifyCenter',right:'justifyRight',justify:'justifyFull'};
+    document.execCommand(cmds[dir], false, null);
+  }
+  ['l','c','r','j'].forEach(k=>{ const b=document.getElementById('aln-'+k); if(b) b.classList.remove('active'); });
+  const km = {left:'l',center:'c',right:'r',justify:'j'};
+  const btn = document.getElementById('aln-'+km[dir]);
+  if (btn) btn.classList.add('active');
+  autoSave();
+}
+
+function applyHighlight(color) {
+  if (_savedSelCells.length > 0) {
+    _savedSelCells.forEach(cell => {
+      cell.style.backgroundColor = color === 'transparent' ? '' : color;
+    });
+    autoSave(); return;
+  }
+  const sel = window.getSelection();
+  let range = null;
+  if (_hlRange) {
+    range = _hlRange; _hlRange = null;
+    sel.removeAllRanges(); sel.addRange(range);
+    // 셀 안이면 셀 focus
+    let node = range.commonAncestorContainer;
+    while (node && node !== document.body) {
+      if ((node.nodeName === 'TD' || node.nodeName === 'TH') && node.isContentEditable) { node.focus(); break; }
+      node = node.parentNode;
+    }
+  } else if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+    range = sel.getRangeAt(0);
+  }
+  if (!range || range.collapsed) { toast('텍스트를 먼저 선택하세요'); return; }
+
+  if (color === 'transparent') {
+    // 선택 범위 안의 모든 mark/하이라이트 span 제거
+    // 1) range를 fragment로 꺼내서 mark 언래핑
+    const frag = range.extractContents();
+    function unwrapMarks(node) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        if (node.tagName === 'MARK' ||
+            (node.tagName === 'SPAN' && node.style.backgroundColor && node.style.backgroundColor !== 'transparent')) {
+          // 자식들을 앞에 펼치기
+          const parent = node.parentNode;
+          while (node.firstChild) parent.insertBefore(node.firstChild, node);
+          parent.removeChild(node);
+          return;
+        }
+        // 자식 순회 (복사본 사용, 중간에 바뀌므로)
+        Array.from(node.childNodes).forEach(unwrapMarks);
+      }
+    }
+    // frag 안에서 unwrap
+    const tmpDiv = document.createElement('div');
+    tmpDiv.appendChild(frag);
+    Array.from(tmpDiv.childNodes).forEach(unwrapMarks);
+    // 다시 삽입
+    range.insertNode(tmpDiv);
+    // tmpDiv 언래핑
+    const parent = tmpDiv.parentNode;
+    while (tmpDiv.firstChild) parent.insertBefore(tmpDiv.firstChild, tmpDiv);
+    parent.removeChild(tmpDiv);
+  } else {
+    // 형광펜 적용
+    try {
+      const frag = range.extractContents();
+      // 기존 mark 제거 후 새 mark로 감싸기
+      function flattenMarks(node) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          if (node.tagName === 'MARK') {
+            const span = document.createElement('span');
+            while (node.firstChild) span.appendChild(node.firstChild);
+            node.parentNode.replaceChild(span, node);
+            return;
+          }
+          Array.from(node.childNodes).forEach(flattenMarks);
+        }
+      }
+      flattenMarks(frag);
+      const mark = document.createElement('mark');
+      mark.style.backgroundColor = color;
+      mark.style.color = 'inherit';
+      mark.style.borderRadius = '2px';
+      mark.appendChild(frag);
+      range.insertNode(mark);
+      sel.removeAllRanges();
+    } catch(e) {
+      document.execCommand('hiliteColor', false, color);
+    }
+  }
+  autoSave();
+}
+
 document.addEventListener('DOMContentLoaded',()=>{
   // jsPDF 실제 A4 높이로 CSS 구분선 정확히 맞추기
   try {
@@ -2518,6 +3197,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
 
   setInterval(saveState, 30000);
+  window.addEventListener('beforeunload', () => saveState());
 });
 </script>
 </body>
