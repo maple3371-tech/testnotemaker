@@ -1648,8 +1648,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       let newText = text
         .replace(/<->/g, '↔')
         .replace(/->/g,  '→')
-        .replace(/<-/g,  '←')
-        .replace(/\*/g,  '·');
+        .replace(/<-/g,  '←');
       if (newText !== text) {
         node.textContent = newText;
         try {
@@ -1674,13 +1673,17 @@ document.addEventListener('DOMContentLoaded',()=>{
     if ((e.ctrlKey||e.metaKey) && e.key==='z' && !e.shiftKey) { if(document.getElementById('editor-view').style.display!=='none') doUndo(); }
     if ((e.ctrlKey||e.metaKey) && (e.key==='y' || (e.key==='z' && e.shiftKey))) { if(document.getElementById('editor-view').style.display!=='none') doRedo(); }
 
-    // Shift+8 (영문 키보드 *) → × 곱하기 기호 삽입
-    // 단, 편집 중인 editor-body 또는 표 셀에서만
+    // Shift+8 → · 가운데 점, Ctrl+8 → × 곱하기
     const active = document.activeElement;
     const inEditor = active && (active.id==='editor-body' || active.closest('.note-table-wrap'));
-    if (inEditor && e.shiftKey && e.code==='Digit8' && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      document.execCommand('insertText', false, '×');
+    if (inEditor && !e.metaKey) {
+      if (e.shiftKey && !e.ctrlKey && e.code==='Digit8') {
+        e.preventDefault();
+        document.execCommand('insertText', false, '·');
+      } else if (e.ctrlKey && !e.shiftKey && e.code==='Digit8') {
+        e.preventDefault();
+        document.execCommand('insertText', false, '×');
+      }
     }
   });
 
