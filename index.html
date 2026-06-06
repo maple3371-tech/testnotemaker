@@ -1832,6 +1832,33 @@ async function savePDF() {
 }
 
 // ── 시험지 PDF ─────────────────────────────────
+// 백틱(`텍스트`) → 밑줄 빈칸 + 번호로 변환
+function applyBlankTransform(rootEl, answers, idxRef) {
+  const root = rootEl.nodeType === Node.DOCUMENT_NODE ? rootEl.body : rootEl;
+  if (!root) return;
+  const textNodes = [];
+  function collect(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (node.textContent.includes('`')) textNodes.push(node);
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      if (node.tagName === 'SCRIPT' || node.tagName === 'STYLE') return;
+      Array.from(node.childNodes).forEach(collect);
+    }
+  }
+  collect(root);
+  textNodes.forEach(node => {
+    if (!node.parentNode) return;
+    const span = document.createElement('span');
+    span.innerHTML = node.textContent.replace(/`([^`]+)`/g, (_, inner) => {
+      idxRef.idx++;
+      answers.push({ num: idxRef.idx, answer: inner });
+      const w = Math.max(60, inner.length * 9);
+      return `<span style="display:inline-block;border-bottom:2px solid #333;min-width:${w}px;margin:0 3px;position:relative;vertical-align:bottom;"><sup style="font-size:9px;color:#aaa;position:absolute;top:-2px;left:1px;">${idxRef.idx}</sup></span>`;
+    });
+    node.parentNode.replaceChild(span, node);
+  });
+}
+
 function makeExam() {
   const note = state.notes.find(n => n.id === state.currentNoteId);
   if (!note) return;
@@ -1981,87 +2008,6 @@ function prepareForCapture(sourceEl) {
   clone.querySelectorAll('.table-toolbar, .col-resize-overlay, .tbl-resize-handle').forEach(el => el.remove());
   document.body.appendChild(clone);
   return clone;
-}
-
-async function savePDF() {
-  const ld = document.getElementById('exam-loading'), msg = document.getElementById('exam-loading-msg');
-  ld.classList.add('show');
-  msg.textContent = '📄 PDF 생성 중...';
-  try {
-    await new Promise(r => setTimeout(r, 50));
-    const {jsPDF} = window.jspdf;
-    const pdf = new jsPDF({orientation:'p', unit:'px', format:'a4'});
-    const pW = pdf.internal.pageSize.getWidth();
-    const pH = pdf.internal.pageSize.getHeight();
-    // single body mode
-
-    const oncloneFix = (doc) => {
-      doc.querySelectorAll('td, th').forEach(cell => {
-        const bg = cell.style.backgroundColor;
-        if (bg && bg !== 'transparent') cell.style.background = bg;
-      });
-      doc.querySelectorAll('mark').forEach(mark => {
-        mark.style.background = mark.style.backgroundColor || '#fff176';
-      });
-      doc.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
-      doc.querySelectorAll(
-        '.table-toolbar, .col-resize-overlay, .tbl-resize-handle, .tbl-row-resize-handle, .tbl-btn, .tbl-drag-handle'
-      ).forEach(el => el.remove());
-      doc.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
-      doc.querySelectorAll('.editor-page').forEach(p => p.removeAttribute('data-page'));
-      // 페이지 번호 가상 요소 제거
-      doc.querySelectorAll('.editor-page').forEach(p => p.style.setProperty('--page-num', '""'));
-    };
-
-    const A4_W = 794;
-    const A4_H = 1123;
-
-    for (let i = 0; i < pages.length; i++) {
-      msg.textContent = `📄 PDF 생성 중... (${i+1}/${pages.length})`;
-      const page = pages[i];
-
-      const clone = page.cloneNode(true);
-      clone.style.cssText = [
-        'position:fixed', 'left:-9999px', 'top:0',
-        `width:${A4_W}px`,
-        `height:${A4_H}px`,          // 정확히 A4 높이 고정
-        `min-height:${A4_H}px`,
-        `max-height:${A4_H}px`,
-        'background:#fff',
-        'padding:52px 60px',
-        'box-sizing:border-box',
-        'z-index:-1',
-        'overflow:hidden'             // 넘치는 내용 잘리지 않게 — 이미 페이지 단위 저장
-      ].join(';');
-      document.body.appendChild(clone);
-      await new Promise(r => setTimeout(r, 120));
-
-      const canvas = await html2canvas(clone, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: '#ffffff',
-        width: A4_W,
-        height: A4_H,                // 정확히 A4 높이만 캡처
-        windowWidth: A4_W,
-        logging: false,
-        onclone: oncloneFix
-      });
-      document.body.removeChild(clone);
-
-      // 슬라이싱 없이 캔버스 전체를 A4 한 페이지에 그대로 삽입
-      if (i > 0) pdf.addPage();
-      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, pW, pH);
-    }
-
-    const title = (document.getElementById('editor-big-title').value || '노트').replace(/[\/\\?%*:|"<>]/g, '-');
-    pdf.save(title + '.pdf');
-    toast('✅ PDF 저장됐어요!');
-  } catch(err) {
-    toast('PDF 오류: ' + err.message);
-    console.error(err);
-  }
-  ld.classList.remove('show');
 }
 
 // ══════════════════════════════════════════
