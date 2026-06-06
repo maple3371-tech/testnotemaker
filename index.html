@@ -332,6 +332,30 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
 .tbl-btn { font-size: 11px; padding: 2px 8px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); cursor: pointer; font-family: var(--font-main); transition: all 0.12s; }
 .tbl-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 
+/* 표 드래그 핸들 */
+.tbl-drag-handle {
+  position: absolute; top: -22px; left: 50%; transform: translateX(-50%);
+  background: var(--accent); color: #fff; border-radius: 6px 6px 0 0;
+  font-size: 11px; padding: 2px 10px; cursor: grab; user-select: none;
+  opacity: 0; transition: opacity 0.15s; white-space: nowrap; z-index: 20;
+  display: flex; align-items: center; gap: 4px;
+}
+.note-table-wrap:hover .tbl-drag-handle { opacity: 1; }
+.tbl-drag-handle:active { cursor: grabbing; }
+body.tbl-dragging * { cursor: grabbing !important; user-select: none !important; }
+
+/* 표 선택 상태 */
+.note-table-wrap.table-selected {
+  outline: 2.5px solid var(--accent);
+  background: rgba(233,69,96,0.04);
+  border-radius: 4px;
+}
+/* 표 드롭 위치 표시선 */
+.tbl-drop-indicator {
+  height: 3px; background: var(--accent); border-radius: 3px;
+  margin: 4px 0; pointer-events: none; display: none;
+}
+
 /* 이미지 */
 .note-img-wrap { display: block; margin: 8px 0; text-align: center; position: relative; }
 .note-img-wrap img { max-width: 100%; border-radius: 8px; border: 1px solid var(--border); }
@@ -988,7 +1012,15 @@ function confirmInsertTable() {
     <button class="tbl-btn" onclick="tblEqualRows(this)" title="Ctrl+클릭 선택 행 or 전체 행 높이 균등">↕ 행높이균등</button>
     <button class="tbl-btn" onclick="tblInsertImg(this)">🖼️셀이미지</button>
     <button class="tbl-btn" onclick="this.closest('.note-table-wrap').remove();autoSave()" style="color:var(--accent)">✕삭제</button>
-    <span style="font-size:10px;color:var(--subtext);align-self:center;margin-left:4px">셀병합: Ctrl+클릭→병합</span>`;
+    <span style="font-size:10px;color:var(--subtext);align-self:center;margin-left:4px">셀병합: Ctrl+클릭→병합 | 표이동: 상단 핸들 드래그</span>`;
+
+  // 드래그 핸들 추가
+  const dragHandle = document.createElement('div');
+  dragHandle.className = 'tbl-drag-handle';
+  dragHandle.innerHTML = '⠿ 표 이동';
+  dragHandle.contentEditable = 'false';
+  wrap.appendChild(dragHandle);
+  attachTableDragHandle(dragHandle, wrap);
 
   wrap.appendChild(tbl);
   wrap.appendChild(toolbar);
@@ -1161,9 +1193,250 @@ function addTableResizeHandle(wrap) {
 }
 
 // ══════════════════════════════════════════
-//  TABLE EVENTS + COL RESIZE
+//  TABLE DRAG MOVE + SELECTION + COPY/CUT
 // ══════════════════════════════════════════
-let _selCells = [];
+
+// 현재 "선택된" 표 (Shift+Arrow 혹은 클릭으로)
+let _selectedTableWrap = null;
+let _tableCopied = null; // {html, wrapW} for Ctrl+C
+
+function selectTable(wrap) {
+  if (_selectedTableWrap && _selectedTableWrap !== wrap) {
+    _selectedTableWrap.classList.remove('table-selected');
+  }
+  _selectedTableWrap = wrap;
+  wrap.classList.add('table-selected');
+}
+function deselectTable() {
+  if (_selectedTableWrap) {
+    _selectedTableWrap.classList.remove('table-selected');
+    _selectedTableWrap = null;
+  }
+}
+
+// 표 드래그 핸들에 이벤트 연결
+function attachTableDragHandle(handle, wrap) {
+  handle.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+
+    selectTable(wrap);
+    document.body.classList.add('tbl-dragging');
+
+    // 드롭 인디케이터 엘리먼트 (재사용)
+    let indicator = document.getElementById('_tbl_drop_ind');
+    if (!indicator) {
+      indicator = document.createElement('div');
+      indicator.id = '_tbl_drop_ind';
+      indicator.className = 'tbl-drop-indicator';
+      document.body.appendChild(indicator);
+    }
+    indicator.style.display = 'none';
+
+    // 커서 근처 삽입 위치 찾기
+    let dropTarget = null; // { parent, before: Element|null }
+
+    const onMove = ev => {
+      const x = ev.clientX, y = ev.clientY;
+      // 표 wrap이 속한 editor body
+      const body = wrap.parentElement;
+      if (!body) return;
+
+      // body 안의 형제 요소들 중 삽입할 위치 탐색
+      const siblings = Array.from(body.children).filter(el => el !== wrap);
+      let best = null, bestDist = Infinity;
+
+      for (const sib of siblings) {
+        const r = sib.getBoundingClientRect();
+        const midY = (r.top + r.bottom) / 2;
+        // 위쪽 경계
+        const distTop = Math.abs(r.top - y);
+        const distBot = Math.abs(r.bottom - y);
+        if (distTop < bestDist) { bestDist = distTop; best = { before: sib }; }
+        if (distBot < bestDist) { bestDist = distBot; best = { before: sib.nextElementSibling }; }
+      }
+      // body 끝
+      const bodyR = body.getBoundingClientRect();
+      if (Math.abs(bodyR.bottom - y) < bestDist) best = { before: null };
+
+      dropTarget = best ? { parent: body, before: best.before } : null;
+
+      // 인디케이터 위치
+      if (dropTarget) {
+        const ref = dropTarget.before;
+        let indY;
+        if (ref) {
+          const rr = ref.getBoundingClientRect();
+          indY = rr.top + window.scrollY - 2;
+          indicator.style.width = rr.width + 'px';
+          indicator.style.left = rr.left + 'px';
+        } else {
+          const last = body.lastElementChild;
+          if (last && last !== wrap) {
+            const rr = last.getBoundingClientRect();
+            indY = rr.bottom + window.scrollY + 2;
+            indicator.style.width = rr.width + 'px';
+            indicator.style.left = rr.left + 'px';
+          }
+        }
+        indicator.style.top = (indY || 0) + 'px';
+        indicator.style.position = 'absolute';
+        indicator.style.display = 'block';
+      }
+    };
+
+    const onUp = ev => {
+      document.body.classList.remove('tbl-dragging');
+      indicator.style.display = 'none';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+
+      if (dropTarget) {
+        const { parent, before } = dropTarget;
+        if (before && before !== wrap && before !== wrap.nextElementSibling) {
+          parent.insertBefore(wrap, before);
+        } else if (!before) {
+          parent.appendChild(wrap);
+        }
+        // wrap 뒤에 빈 p 보장
+        if (!wrap.nextElementSibling || wrap.nextElementSibling.classList?.contains('note-table-wrap')) {
+          const p = document.createElement('p'); p.innerHTML = '<br>';
+          wrap.after(p);
+        }
+        autoSave();
+        toast('표를 이동했어요');
+      }
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
+// restorePages 이후 기존 표에도 드래그 핸들 연결
+function attachDragHandlesToAllTables() {
+  document.querySelectorAll('.note-table-wrap').forEach(wrap => {
+    if (!wrap.querySelector('.tbl-drag-handle')) {
+      const dragHandle = document.createElement('div');
+      dragHandle.className = 'tbl-drag-handle';
+      dragHandle.innerHTML = '⠿ 표 이동';
+      dragHandle.contentEditable = 'false';
+      wrap.appendChild(dragHandle);
+      attachTableDragHandle(dragHandle, wrap);
+    }
+  });
+}
+
+// Shift+ArrowUp/Down으로 표 선택 (커서가 표 바로 앞/뒤에 있을 때)
+// → 키보드 이벤트 섹션에서 처리 (아래 keydown listener에 통합)
+
+// Ctrl+C / Ctrl+X 표 복사/잘라내기
+document.addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+
+  // 선택된 표가 있을 때 C/X
+  if (_selectedTableWrap) {
+    if (e.key === 'c') {
+      e.preventDefault();
+      _tableCopied = {
+        html: _selectedTableWrap.outerHTML,
+        type: 'table'
+      };
+      toast('표를 복사했어요 📋');
+      return;
+    }
+    if (e.key === 'x') {
+      e.preventDefault();
+      _tableCopied = {
+        html: _selectedTableWrap.outerHTML,
+        type: 'table'
+      };
+      const next = _selectedTableWrap.nextElementSibling;
+      const prev = _selectedTableWrap.previousElementSibling;
+      _selectedTableWrap.remove();
+      _selectedTableWrap = null;
+      // 커서를 앞 혹은 뒤 요소로
+      const target = next || prev;
+      if (target && target.isContentEditable) {
+        target.focus(); placeCursorAtEnd(target);
+      } else if (target) {
+        const ed = target.querySelector?.('[contenteditable]');
+        if (ed) { ed.focus(); placeCursorAtEnd(ed); }
+      }
+      autoSave();
+      toast('표를 잘라냈어요 ✂️');
+      return;
+    }
+    if (e.key === 'v' && _tableCopied?.type === 'table') {
+      // 선택 표 있을 때 V → 그 뒤에 붙여넣기
+      e.preventDefault();
+      const tmp = document.createElement('div');
+      tmp.innerHTML = _tableCopied.html;
+      const newWrap = tmp.firstElementChild;
+      if (newWrap) {
+        _selectedTableWrap.after(newWrap);
+        // 이벤트 재연결
+        const newTbl = newWrap.querySelector('.note-table');
+        if (newTbl) { newTbl.querySelectorAll('td,th').forEach(c=>c._ev=false); attachTableEvents(newTbl); }
+        addTableResizeHandle(newWrap);
+        const dh = document.createElement('div');
+        dh.className='tbl-drag-handle'; dh.innerHTML='⠿ 표 이동'; dh.contentEditable='false';
+        newWrap.appendChild(dh); attachTableDragHandle(dh, newWrap);
+        autoSave(); toast('표를 붙여넣었어요!');
+      }
+      return;
+    }
+  }
+
+  // 일반 Ctrl+V에서 표 붙여넣기 (커서 위치)
+  if (e.key === 'v' && _tableCopied?.type === 'table') {
+    const active = document.activeElement;
+    const inEditor = active && active.isContentEditable && active.closest('.editor-page');
+    const inCell = active && (active.nodeName === 'TD' || active.nodeName === 'TH');
+    if (inEditor && !inCell) {
+      e.preventDefault();
+      const tmp = document.createElement('div');
+      tmp.innerHTML = _tableCopied.html;
+      const newWrap = tmp.firstElementChild;
+      if (newWrap) {
+        // 커서 위치 뒤에 삽입
+        const sel = window.getSelection();
+        let insertAfter = null;
+        if (sel && sel.rangeCount > 0) {
+          let node = sel.getRangeAt(0).commonAncestorContainer;
+          while (node && node !== active) {
+            if (node.parentNode === active) { insertAfter = node; break; }
+            node = node.parentNode;
+          }
+        }
+        if (insertAfter) { insertAfter.after(newWrap); }
+        else { active.appendChild(newWrap); }
+        const p = document.createElement('p'); p.innerHTML = '<br>';
+        newWrap.after(p);
+        const newTbl = newWrap.querySelector('.note-table');
+        if (newTbl) { newTbl.querySelectorAll('td,th').forEach(c=>c._ev=false); attachTableEvents(newTbl); }
+        addTableResizeHandle(newWrap);
+        const dh = document.createElement('div');
+        dh.className='tbl-drag-handle'; dh.innerHTML='⠿ 표 이동'; dh.contentEditable='false';
+        newWrap.appendChild(dh); attachTableDragHandle(dh, newWrap);
+        autoSave(); toast('표를 붙여넣었어요!');
+      }
+      return;
+    }
+  }
+});
+
+// 에디터 클릭 시 표 선택 해제 (표 바깥 클릭)
+document.addEventListener('mousedown', e => {
+  if (_selectedTableWrap && !_selectedTableWrap.contains(e.target)) {
+    deselectTable();
+  }
+}, true);
+
+// 표 클릭으로 선택 (셀 안 편집과 구분: 표 wrap 자체 클릭)
+// → attachTableEvents에서 셀 클릭 시 Shift키 확인
+
+
 
 function attachTableEvents(tbl) {
   rebuildColLines(tbl);
@@ -1565,6 +1838,14 @@ function restorePages(html) {
     body.querySelectorAll('.note-table-wrap').forEach(wrap => {
       wrap.querySelectorAll('.tbl-resize-handle').forEach(h => h.remove());
       addTableResizeHandle(wrap);
+      // 드래그 핸들 재연결
+      wrap.querySelectorAll('.tbl-drag-handle').forEach(h => h.remove());
+      const dh = document.createElement('div');
+      dh.className = 'tbl-drag-handle';
+      dh.innerHTML = '⠿ 표 이동';
+      dh.contentEditable = 'false';
+      wrap.appendChild(dh);
+      attachTableDragHandle(dh, wrap);
     });
   });
   updatePageNumbers();
@@ -2382,61 +2663,158 @@ document.addEventListener('DOMContentLoaded',()=>{
     if (page) { _savedRange = sel.getRangeAt(0).cloneRange(); }
   });
 
-  // ── 페이지 간 / 표 앞뒤 화살표 이동 ──────────────
-  document.addEventListener('keydown', e => {
-    // 에디터 내 contenteditable 포커스일 때만
-    const active = document.activeElement;
-    const inEditorPage = active && active.isContentEditable && active.closest('.editor-page');
-    const inTableCell = active && (active.nodeName === 'TD' || active.nodeName === 'TH');
-    if (!inEditorPage && !inTableCell) return;
-    if (e.ctrlKey || e.metaKey || e.shiftKey) return; // 수식어 키 있으면 패스
+  document.addEventListener('selectionchange', () => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const node = sel.anchorNode;
+    if (!node) return;
+    const page = node.nodeType === 1 ? node.closest?.('.editor-page') : node.parentElement?.closest?.('.editor-page');
+    if (page) { _savedRange = sel.getRangeAt(0).cloneRange(); }
+  });
 
+  // ── 페이지 간 / 표 앞뒤 화살표 이동 ──────────────
+  // Shift+화살표로 표 선택 (커서가 표 바로 옆에 있을 때)
+  document.addEventListener('keydown', e => {
+    if (!e.shiftKey || e.ctrlKey || e.metaKey) return;
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const active = document.activeElement;
+    if (!active || !active.isContentEditable) return;
+    const inPage = active.closest('.editor-page');
+    if (!inPage) return;
+    const inCell = active.nodeName === 'TD' || active.nodeName === 'TH';
+    if (inCell) return;
+
+    // 선택된 표가 있으면 Delete/BackSpace처럼 처리하지 않고 선택만 유지
+    // 커서 위치 확인
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) return;
 
-    // ── ↓ : 현재 페이지 마지막 줄 → 다음 페이지 첫 줄
-    if (e.key === 'ArrowDown' && !inTableCell) {
-      const body = active;
-      const page = body.closest('.editor-page');
-      if (!page) return;
-      // 커서가 body의 마지막 줄에 있는지 확인
-      const range = sel.getRangeAt(0);
-      const rangeRect = range.getBoundingClientRect();
-      const bodyRect = body.getBoundingClientRect();
-      const isLastLine = rangeRect.bottom >= bodyRect.bottom - 30;
-      if (isLastLine) {
-        const pages = Array.from(document.querySelectorAll('.editor-page'));
-        const curIdx = pages.indexOf(page);
+    const body = active;
+    const siblings = Array.from(body.children);
+
+    if (e.key === 'ArrowDown') {
+      // 커서가 body 맨 끝에 있는지 확인
+      requestAnimationFrame(() => {
+        const sel2 = window.getSelection();
+        if (!sel2 || sel2.rangeCount === 0) return;
+        const r = sel2.getRangeAt(0);
+        const rects = r.getClientRects();
+        const caretBottom = rects.length > 0 ? rects[0].bottom : r.getBoundingClientRect().bottom;
+        const bodyBottom = body.getBoundingClientRect().bottom;
+        if (caretBottom < bodyBottom - 5) return;
+        // 커서가 body 하단 → body 다음 형제에서 표 찾기
+        const bodyParent = body.parentElement;
+        if (!bodyParent) return;
+        const bodySibs = Array.from(bodyParent.children);
+        const bi = bodySibs.indexOf(body);
+        for (let i = bi + 1; i < bodySibs.length; i++) {
+          if (bodySibs[i].classList?.contains('note-table-wrap')) {
+            selectTable(bodySibs[i]);
+            toast('표 선택됨 — Ctrl+C로 복사, Ctrl+X로 잘라내기');
+            return;
+          }
+        }
+      });
+    }
+
+    if (e.key === 'ArrowUp') {
+      requestAnimationFrame(() => {
+        const sel2 = window.getSelection();
+        if (!sel2 || sel2.rangeCount === 0) return;
+        const r = sel2.getRangeAt(0);
+        const rects = r.getClientRects();
+        const caretTop = rects.length > 0 ? rects[0].top : r.getBoundingClientRect().top;
+        const bodyTop = body.getBoundingClientRect().top;
+        if (caretTop > bodyTop + 5) return;
+        // 커서가 body 상단 → body 이전 형제에서 표 찾기
+        const bodyParent = body.parentElement;
+        if (!bodyParent) return;
+        const bodySibs = Array.from(bodyParent.children);
+        const bi = bodySibs.indexOf(body);
+        for (let i = bi - 1; i >= 0; i--) {
+          if (bodySibs[i].classList?.contains('note-table-wrap')) {
+            selectTable(bodySibs[i]);
+            toast('표 선택됨 — Ctrl+C로 복사, Ctrl+X로 잘라내기');
+            return;
+          }
+        }
+      });
+    }
+  });
+
+  // Delete/BackSpace 키로 선택된 표 삭제
+  document.addEventListener('keydown', e => {
+    if (!_selectedTableWrap) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      const prev = _selectedTableWrap.previousElementSibling;
+      const next = _selectedTableWrap.nextElementSibling;
+      _selectedTableWrap.remove();
+      _selectedTableWrap = null;
+      const target = prev || next;
+      if (target && target.isContentEditable) { target.focus(); placeCursorAtEnd(target); }
+      autoSave(); toast('표를 삭제했어요');
+    }
+    if (e.key === 'Escape') { deselectTable(); }
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    const active = document.activeElement;
+    if (!active || !active.isContentEditable) return;
+    const inPage = active.closest('.editor-page');
+    if (!inPage) return;
+    const inCell = active.nodeName === 'TD' || active.nodeName === 'TH';
+    if (inCell) return; // 표 셀은 표 전용 핸들러가 처리
+
+    const body = active;
+    const pages = Array.from(document.querySelectorAll('.editor-page'));
+    const curIdx = pages.indexOf(inPage);
+
+    // ↓ : 브라우저 처리 후 커서가 body 밖이면 다음 페이지
+    if (e.key === 'ArrowDown') {
+      const snapRange = window.getSelection()?.rangeCount > 0 ? window.getSelection().getRangeAt(0).cloneRange() : null;
+      requestAnimationFrame(() => {
+        const sel2 = window.getSelection();
+        if (!sel2 || sel2.rangeCount === 0) return;
+        // 커서가 여전히 같은 body 안에 있으면 이동 불필요
+        if (body.contains(sel2.anchorNode)) {
+          // 추가 체크: 커서 Y가 body 바닥에 있는지
+          const r = sel2.getRangeAt(0);
+          const rects = r.getClientRects();
+          const caretBottom = rects.length > 0 ? rects[0].bottom : r.getBoundingClientRect().bottom;
+          const bodyBottom = body.getBoundingClientRect().bottom;
+          if (caretBottom < bodyBottom - 5) return; // 아직 중간 → 이동 불필요
+        }
+        // 커서가 body 밖이거나 body 바닥 → 다음 페이지
         if (curIdx < pages.length - 1) {
-          e.preventDefault();
           const nextBody = pages[curIdx + 1].querySelector('[contenteditable]');
           if (nextBody) {
             nextBody.focus();
-            // 다음 페이지 첫 줄로 커서
-            const r = document.createRange();
-            r.setStart(nextBody, 0);
-            r.collapse(true);
-            sel.removeAllRanges(); sel.addRange(r);
+            const r2 = document.createRange();
+            r2.setStart(nextBody, 0);
+            r2.collapse(true);
+            sel2.removeAllRanges(); sel2.addRange(r2);
             pages[curIdx + 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           }
         }
-      }
+      });
     }
 
-    // ── ↑ : 현재 페이지 첫 줄 → 이전 페이지 마지막 줄
-    if (e.key === 'ArrowUp' && !inTableCell) {
-      const body = active;
-      const page = body.closest('.editor-page');
-      if (!page) return;
-      const range = sel.getRangeAt(0);
-      const rangeRect = range.getBoundingClientRect();
-      const bodyRect = body.getBoundingClientRect();
-      const isFirstLine = rangeRect.top <= bodyRect.top + 30;
-      if (isFirstLine) {
-        const pages = Array.from(document.querySelectorAll('.editor-page'));
-        const curIdx = pages.indexOf(page);
+    // ↑ : 브라우저 처리 후 커서가 body 밖이면 이전 페이지
+    if (e.key === 'ArrowUp') {
+      requestAnimationFrame(() => {
+        const sel2 = window.getSelection();
+        if (!sel2 || sel2.rangeCount === 0) return;
+        if (body.contains(sel2.anchorNode)) {
+          const r = sel2.getRangeAt(0);
+          const rects = r.getClientRects();
+          const caretTop = rects.length > 0 ? rects[0].top : r.getBoundingClientRect().top;
+          const bodyTop = body.getBoundingClientRect().top;
+          if (caretTop > bodyTop + 5) return;
+        }
         if (curIdx > 0) {
-          e.preventDefault();
           const prevBody = pages[curIdx - 1].querySelector('[contenteditable]');
           if (prevBody) {
             prevBody.focus();
@@ -2444,55 +2822,46 @@ document.addEventListener('DOMContentLoaded',()=>{
             pages[curIdx - 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           }
         }
-      }
+      });
     }
 
-    // ── → : 표 뒤 텍스트로 이동 (커서가 표 바로 앞 / 텍스트 끝에서)
-    if (e.key === 'ArrowRight' && !inTableCell) {
-      const body = active;
-      if (!isCursorAtTextEnd(body)) return;
-      // body 끝 다음 형제가 표 wrap인지 확인
-      // (표는 body 밖 editor-page에 있으므로, body 다음 형제 탐색)
-      // 실제로는 표가 body 안에 있음 - 표 wrap 다음 텍스트로 이동
-      const range = sel.getRangeAt(0);
-      const container = range.endContainer;
-      // 표 직전 노드에서 → 누르면 표의 첫 셀로
-      let next = container.nextSibling || container.parentNode?.nextSibling;
-      while (next) {
-        if (next.nodeType === 1 && next.classList?.contains('note-table-wrap')) {
-          e.preventDefault();
-          const firstCell = next.querySelector('th, td');
-          if (firstCell) { firstCell.focus(); placeCursorAtStart(firstCell); }
-          return;
-        }
-        next = next.nextSibling;
-      }
-    }
-
-    // ── ← : 표 앞 텍스트로 이동
-    if (e.key === 'ArrowLeft' && !inTableCell) {
-      const body = active;
-      const range = sel.getRangeAt(0);
-      // 커서가 body 맨 앞에 있고, 앞에 표가 있으면 표 마지막 셀로
-      const isStart = range.startOffset === 0 &&
-        (!range.startContainer.previousSibling) &&
-        (range.startContainer === body || range.startContainer.parentNode === body);
-      if (isStart) {
-        // body 이전 형제에서 표 wrap 탐색
-        let prev = body.previousSibling || body.parentNode?.previousSibling;
-        while (prev) {
-          if (prev.nodeType === 1 && prev.classList?.contains('note-table-wrap')) {
-            e.preventDefault();
-            const cells = prev.querySelectorAll('td, th');
-            const lastCell = cells[cells.length - 1];
-            if (lastCell) { lastCell.focus(); placeCursorAtEnd(lastCell); }
+    // → : body 밖으로 나갔고 다음에 표가 있으면 표 첫 셀로
+    if (e.key === 'ArrowRight') {
+      requestAnimationFrame(() => {
+        const sel2 = window.getSelection();
+        if (!sel2 || sel2.rangeCount === 0) return;
+        if (body.contains(sel2.anchorNode)) return;
+        const siblings = Array.from(body.parentNode?.children || []);
+        const bi = siblings.indexOf(body);
+        for (let i = bi + 1; i < siblings.length; i++) {
+          if (siblings[i].classList?.contains('note-table-wrap')) {
+            const firstCell = siblings[i].querySelector('th, td');
+            if (firstCell) { firstCell.focus(); placeCursorAtStart(firstCell); }
             return;
           }
-          prev = prev.previousSibling;
         }
-      }
+      });
     }
-  }, true); // capture phase로 표 셀 keydown보다 먼저 처리
+
+    // ← : body 밖으로 나갔고 이전에 표가 있으면 표 마지막 셀로
+    if (e.key === 'ArrowLeft') {
+      requestAnimationFrame(() => {
+        const sel2 = window.getSelection();
+        if (!sel2 || sel2.rangeCount === 0) return;
+        if (body.contains(sel2.anchorNode)) return;
+        const siblings = Array.from(body.parentNode?.children || []);
+        const bi = siblings.indexOf(body);
+        for (let i = bi - 1; i >= 0; i--) {
+          if (siblings[i].classList?.contains('note-table-wrap')) {
+            const cells = siblings[i].querySelectorAll('td, th');
+            if (cells.length) { cells[cells.length - 1].focus(); placeCursorAtEnd(cells[cells.length - 1]); }
+            return;
+          }
+        }
+      });
+    }
+  });
+
 
   // Ctrl+S 저장, Ctrl+Z undo, Ctrl+Y redo, Shift+8 → ×, Ctrl+Enter → 새 페이지
   document.addEventListener('keydown', e => {
