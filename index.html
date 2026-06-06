@@ -294,7 +294,24 @@ input.tool-color { width: 28px; height: 28px; border-radius: 6px; border: 1px so
 }
 .col-resize-line:hover, .col-resize-line.resizing { background: rgba(233,69,96,0.4); }
 
-/* 표 전체 크기 조절 핸들 */
+/* 표 세로 리사이즈 핸들 */
+.tbl-row-resize-handle {
+  position: absolute; left: 0; bottom: -8px;
+  width: 100%; height: 8px;
+  cursor: row-resize; z-index: 10;
+  background: transparent;
+  display: flex; align-items: center; justify-content: center;
+}
+.tbl-row-resize-handle::after {
+  content: '';
+  width: 40px; height: 3px;
+  background: var(--accent);
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.note-table-wrap:hover .tbl-row-resize-handle::after { opacity: 0.7; }
+body.row-resizing * { cursor: row-resize !important; user-select: none !important; }
 .tbl-resize-handle {
   position: absolute; right: -8px; bottom: 28px;
   width: 16px; height: 16px;
@@ -348,7 +365,6 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
 .exam-spinner { width: 40px; height: 40px; border: 4px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ── PRINT ── */
 @media print { body * { visibility: hidden; } #print-area, #print-area * { visibility: visible; } #print-area { position: fixed; inset: 0; background: #fff; padding: 30px; } }
 
 ::-webkit-scrollbar { width: 6px; height: 5px; }
@@ -413,6 +429,7 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
         <span id="page-total" style="font-size:13px;font-weight:700;color:var(--subtext)">1</span>
       </div>
       <button class="tb-btn" onclick="addNewPage()" title="페이지 추가" style="padding:6px 9px">＋</button>
+      <button class="tb-btn" onclick="showDeletePageModal()" title="페이지 삭제" style="padding:6px 9px;color:var(--accent)">🗑</button>
       <div style="width:1px;height:20px;background:var(--border);flex-shrink:0"></div>
       <button class="tb-btn" onclick="doUndo()" title="실행 취소 (Ctrl+Z)" id="btn-undo">↩ 취소</button>
       <button class="tb-btn" onclick="doRedo()" title="다시 실행 (Ctrl+Y)" id="btn-redo">↪ 재실행</button>
@@ -527,6 +544,63 @@ function loadState() {
     const s = localStorage.getItem('studynote_v5');
     if (s) { const p = JSON.parse(s); state.subjects = p.subjects||state.subjects; state.notes = p.notes||[]; }
   } catch(e) {}
+  // 첫 실행 시 가이드 노트 자동 생성
+  if (state.notes.length === 0) {
+    state.notes.push(createGuideNote());
+  }
+}
+
+function createGuideNote() {
+  return {
+    id: 'guide_' + Date.now(),
+    title: '✏️ 스터디노트 사용 가이드',
+    subject: '',
+    updatedAt: Date.now(),
+    html: `<h1 class="note-h1">✏️ 스터디노트 사용 가이드</h1>
+<p>스터디노트에 오신 걸 환영해요! 아래에서 주요 기능을 확인해보세요.</p>
+
+<h2 class="note-h2">📝 입력 자동 변환</h2>
+<div class="note-table-wrap" contenteditable="false" style="width:100%"><table class="note-table" style="width:100%"><colgroup><col style="width:30%"><col style="width:25%"><col style="width:45%"></colgroup>
+<tbody>
+<tr><th contenteditable="true">입력</th><th contenteditable="true">결과</th><th contenteditable="true">설명</th></tr>
+<tr><td contenteditable="true">*</td><td contenteditable="true">·</td><td contenteditable="true">Shift+8 — 가운데 점</td></tr>
+<tr><td contenteditable="true">Ctrl+8</td><td contenteditable="true">×</td><td contenteditable="true">곱하기 기호</td></tr>
+<tr><td contenteditable="true">-&gt;</td><td contenteditable="true">→</td><td contenteditable="true">오른쪽 화살표</td></tr>
+<tr><td contenteditable="true">&lt;-</td><td contenteditable="true">←</td><td contenteditable="true">왼쪽 화살표</td></tr>
+<tr><td contenteditable="true">&lt;&amp;&gt;</td><td contenteditable="true">↔</td><td contenteditable="true">양방향 화살표</td></tr>
+</tbody></table><div class="table-toolbar" contenteditable="false"></div></div>
+
+<h2 class="note-h2">⌨️ 단축키</h2>
+<div class="note-table-wrap" contenteditable="false" style="width:100%"><table class="note-table" style="width:100%"><colgroup><col style="width:35%"><col style="width:65%"></colgroup>
+<tbody>
+<tr><th contenteditable="true">단축키</th><th contenteditable="true">기능</th></tr>
+<tr><td contenteditable="true">Ctrl+S</td><td contenteditable="true">저장</td></tr>
+<tr><td contenteditable="true">Ctrl+Z</td><td contenteditable="true">실행 취소</td></tr>
+<tr><td contenteditable="true">Ctrl+Y / Ctrl+Shift+Z</td><td contenteditable="true">다시 실행</td></tr>
+<tr><td contenteditable="true">Tab (표 안에서)</td><td contenteditable="true">다음 셀로 이동</td></tr>
+<tr><td contenteditable="true">↑ / ↓ (표 안에서)</td><td contenteditable="true">위/아래 셀로 이동</td></tr>
+<tr><td contenteditable="true">Ctrl+클릭 (표 셀)</td><td contenteditable="true">여러 셀 선택 (서식 일괄 적용)</td></tr>
+</tbody></table><div class="table-toolbar" contenteditable="false"></div></div>
+
+<h2 class="note-h2">📋 시험지 만들기</h2>
+<p>백틱( <code style="background:#f0f0f0;padding:1px 6px;border-radius:4px;font-family:monospace;font-size:13px;color:#c0392b">&#96;</code> )으로 감싼 단어가 시험지에서 빈칸으로 바뀌어요. 키보드 숫자 1 왼쪽 키예요.</p>
+<p>예) 수도는 <code style="background:#fff8e1;padding:1px 6px;border-radius:4px;font-family:monospace;font-size:13px;color:#e67e22">&#96;서울&#96;</code>이다 → 수도는 ______①이다</p>
+<p>시험지 PDF에는 빈칸 문제지 + 번호별 정답지가 함께 저장돼요.</p>
+
+<h2 class="note-h2">🖼️ 기타 기능</h2>
+<div class="note-table-wrap" contenteditable="false" style="width:100%"><table class="note-table" style="width:100%"><colgroup><col style="width:35%"><col style="width:65%"></colgroup>
+<tbody>
+<tr><th contenteditable="true">기능</th><th contenteditable="true">설명</th></tr>
+<tr><td contenteditable="true">과목 관리</td><td contenteditable="true">왼쪽 사이드바에서 과목 추가/편집/삭제. 과목 색이 노트 테마색으로 적용돼요.</td></tr>
+<tr><td contenteditable="true">페이지 이동</td><td contenteditable="true">툴바의 페이지 번호 입력 후 Enter — 해당 페이지로 바로 이동</td></tr>
+<tr><td contenteditable="true">사이드바 숨기기</td><td contenteditable="true">사이드바 오른쪽 ◀ 버튼 클릭</td></tr>
+<tr><td contenteditable="true">표 셀 병합</td><td contenteditable="true">Ctrl+클릭으로 셀 선택 후 [병합] 버튼</td></tr>
+<tr><td contenteditable="true">형광펜</td><td contenteditable="true">텍스트 드래그 선택 후 형광펜 색 클릭. X 스와치로 제거.</td></tr>
+<tr><td contenteditable="true">PDF 저장</td><td contenteditable="true">노트 PDF는 페이지 단위로 저장. 시험지도 요소 단위로 잘리지 않게 저장.</td></tr>
+</tbody></table><div class="table-toolbar" contenteditable="false"></div></div>
+
+<p style="color:#aaa;font-size:12px;margin-top:16px">이 노트는 삭제해도 되고, 그냥 참고용으로 남겨두셔도 돼요 😊</p>`
+  };
 }
 
 function saveState() {
@@ -866,6 +940,7 @@ function confirmInsertTable() {
     <button class="tbl-btn" onclick="tblDelCol(this)">➖열</button>
     <button class="tbl-btn" onclick="tblMerge(this)">병합</button>
     <button class="tbl-btn" onclick="tblSplit(this)">분할</button>
+    <button class="tbl-btn" onclick="tblEqualRows(this)" title="Ctrl+클릭 선택 행 or 전체 행 높이 균등">↕ 행높이균등</button>
     <button class="tbl-btn" onclick="tblInsertImg(this)">🖼️셀이미지</button>
     <button class="tbl-btn" onclick="this.closest('.note-table-wrap').remove();autoSave()" style="color:var(--accent)">✕삭제</button>
     <span style="font-size:10px;color:var(--subtext);align-self:center;margin-left:4px">셀병합: Ctrl+클릭→병합</span>`;
@@ -904,29 +979,95 @@ function confirmInsertTable() {
 // ══════════════════════════════════════════
 //  TABLE RESIZE HANDLE (표 전체 크기)
 // ══════════════════════════════════════════
+// ══════════════════════════════════════════
+//  TABLE UNDO STACK
+// ══════════════════════════════════════════
+// 표 조작은 contenteditable undo 스택에 안 들어가므로 별도 관리
+const _tblUndo = new WeakMap(); // wrap → [{html, colWidths}]
+const _tblRedo = new WeakMap();
+
+function tblSnapshot(wrap) {
+  const tbl = wrap.querySelector('.note-table');
+  if (!tbl) return;
+  const stack = _tblUndo.get(wrap) || [];
+  stack.push({
+    html: tbl.outerHTML,
+    wrapW: wrap.style.width
+  });
+  if (stack.length > 30) stack.shift();
+  _tblUndo.set(wrap, stack);
+  _tblRedo.set(wrap, []); // redo 초기화
+}
+
+function tblUndoAction(wrap) {
+  const stack = _tblUndo.get(wrap) || [];
+  if (!stack.length) return;
+  const tbl = wrap.querySelector('.note-table');
+  // 현재 상태를 redo에 저장
+  const redoStack = _tblRedo.get(wrap) || [];
+  if (tbl) redoStack.push({ html: tbl.outerHTML, wrapW: wrap.style.width });
+  _tblRedo.set(wrap, redoStack);
+  // undo 적용
+  const prev = stack.pop();
+  _tblUndo.set(wrap, stack);
+  applyTblSnapshot(wrap, prev);
+}
+
+function tblRedoAction(wrap) {
+  const stack = _tblRedo.get(wrap) || [];
+  if (!stack.length) return;
+  const tbl = wrap.querySelector('.note-table');
+  const undoStack = _tblUndo.get(wrap) || [];
+  if (tbl) undoStack.push({ html: tbl.outerHTML, wrapW: wrap.style.width });
+  _tblUndo.set(wrap, undoStack);
+  const next = stack.pop();
+  _tblRedo.set(wrap, stack);
+  applyTblSnapshot(wrap, next);
+}
+
+function applyTblSnapshot(wrap, snap) {
+  if (!snap) return;
+  const oldTbl = wrap.querySelector('.note-table');
+  if (oldTbl) oldTbl.remove();
+  const tmp = document.createElement('div');
+  tmp.innerHTML = snap.html;
+  const newTbl = tmp.querySelector('.note-table') || tmp.firstElementChild;
+  if (newTbl) {
+    // overlay 앞에 삽입
+    const overlay = wrap.querySelector('.col-resize-overlay');
+    overlay ? wrap.insertBefore(newTbl, overlay) : wrap.prepend(newTbl);
+  }
+  if (snap.wrapW) wrap.style.width = snap.wrapW;
+  // 이벤트 재연결
+  const tbl = wrap.querySelector('.note-table');
+  if (tbl) {
+    tbl.querySelectorAll('td,th').forEach(c => c._ev = false);
+    attachTableEvents(tbl);
+  }
+  autoSave();
+}
+
+// ══════════════════════════════════════════
+//  TABLE RESIZE (wrap 전체 너비)
+// ══════════════════════════════════════════
 function addTableResizeHandle(wrap) {
-  // 기존 핸들 제거
-  wrap.querySelectorAll('.tbl-resize-handle').forEach(h=>h.remove());
-  const handle = document.createElement('div');
-  handle.className = 'tbl-resize-handle';
-  handle.title = '드래그로 표 크기 조절';
-  wrap.appendChild(handle);
+  wrap.querySelectorAll('.tbl-resize-handle, .tbl-row-resize-handle').forEach(h => h.remove());
 
-  let startX=0, startY=0, startW=0, startH=0;
-  handle.addEventListener('mousedown', e=>{
+  // 가로 크기 핸들 (오른쪽)
+  const hHandle = document.createElement('div');
+  hHandle.className = 'tbl-resize-handle';
+  hHandle.title = '드래그로 표 너비 조절';
+  wrap.appendChild(hHandle);
+  let startX = 0, startW = 0;
+  hHandle.addEventListener('mousedown', e => {
     e.preventDefault(); e.stopPropagation();
-    startX = e.clientX;
-    // fit-content일 수 있으므로 실제 렌더링 너비로 초기화
-    startW = wrap.getBoundingClientRect().width;
-    wrap.style.width = startW + 'px'; // 고정 시작
+    startX = e.clientX; startW = wrap.getBoundingClientRect().width;
+    wrap.style.width = startW + 'px';
     document.body.classList.add('tbl-resizing');
-
     const onMove = me => {
-      const dx = me.clientX - startX;
-      const dy = me.clientY - startY;
-      const newW = Math.max(120, startW + dx);
-      wrap.style.width = newW + 'px';
-      // 높이는 행 높이로 자동 조절되므로 따로 안 건드림
+      wrap.style.width = Math.max(120, startW + me.clientX - startX) + 'px';
+      const tbl = wrap.querySelector('.note-table');
+      if (tbl) rebuildColLines(tbl);
     };
     const onUp = () => {
       document.body.classList.remove('tbl-resizing');
@@ -937,30 +1078,72 @@ function addTableResizeHandle(wrap) {
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   });
+
+  // 세로 크기 핸들 (아래)
+  const vHandle = document.createElement('div');
+  vHandle.className = 'tbl-row-resize-handle';
+  vHandle.title = '드래그로 행 높이 조절';
+  wrap.appendChild(vHandle);
+  let startY2 = 0, startCellH = 0;
+  vHandle.addEventListener('mousedown', e => {
+    e.preventDefault(); e.stopPropagation();
+    startY2 = e.clientY;
+    const tbl = wrap.querySelector('.note-table');
+    const lastRow = tbl?.rows[tbl.rows.length - 1];
+    startCellH = lastRow?.offsetHeight || 40;
+    document.body.classList.add('row-resizing');
+    const onMove = me => {
+      const dy = me.clientY - startY2;
+      const newH = Math.max(28, startCellH + dy);
+      if (tbl) {
+        Array.from(tbl.rows).forEach(row => {
+          Array.from(row.cells).forEach(cell => {
+            cell.style.height = newH + 'px';
+            cell.style.minHeight = newH + 'px';
+          });
+        });
+      }
+    };
+    const onUp = () => {
+      document.body.classList.remove('row-resizing');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      autoSave();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
 }
 
 // ══════════════════════════════════════════
-//  TABLE EVENTS (col resize overlay + keyboard)
+//  TABLE EVENTS + COL RESIZE
 // ══════════════════════════════════════════
 let _selCells = [];
 
 function attachTableEvents(tbl) {
-  initColResizeOverlay(tbl);
+  rebuildColLines(tbl);
 
-  tbl.querySelectorAll('td,th').forEach(cell=>{
+  tbl.querySelectorAll('td,th').forEach(cell => {
     if (cell._ev) return; cell._ev = true;
-    cell.addEventListener('mousedown',e=>{
-      if (e.ctrlKey||e.metaKey) {
+
+    cell.addEventListener('mousedown', e => {
+      if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         cell.classList.toggle('selected-cell');
-        if (cell.classList.contains('selected-cell')) { if(!_selCells.includes(cell)) _selCells.push(cell); }
-        else _selCells = _selCells.filter(c=>c!==cell);
+        if (cell.classList.contains('selected-cell')) {
+          if (!_selCells.includes(cell)) _selCells.push(cell);
+        } else {
+          _selCells = _selCells.filter(c => c !== cell);
+        }
       } else {
-        _selCells.forEach(c=>c.classList.remove('selected-cell')); _selCells=[];
+        _selCells.forEach(c => c.classList.remove('selected-cell'));
+        _selCells = [];
       }
     });
+
     cell.addEventListener('input', autoSave);
-    // 셀 안 selection 변화 추적 → 서식 버튼에서 쓸 수 있게
+    cell.addEventListener('focus', () => { _lastFocusedCell = cell; });
+
     const trackSel = () => {
       const s = window.getSelection();
       if (s && s.rangeCount > 0) _savedRange = s.getRangeAt(0).cloneRange();
@@ -968,42 +1151,61 @@ function attachTableEvents(tbl) {
     cell.addEventListener('mouseup', trackSel);
     cell.addEventListener('keyup', trackSel);
     cell.addEventListener('focus', trackSel);
-    cell.addEventListener('keydown', e=>{
-      const rowIdx=cell.parentElement.rowIndex, colIdx=cell.cellIndex;
-      const rows=tbl.rows, colCnt=cell.parentElement.cells.length;
-      if (e.key==='Enter'&&!e.shiftKey) { e.stopPropagation(); return; }
-      if (e.key==='Tab') {
+
+    cell.addEventListener('keydown', e => {
+      const rowIdx = cell.parentElement.rowIndex;
+      const colIdx = cell.cellIndex;
+      const rows = tbl.rows;
+      const colCnt = cell.parentElement.cells.length;
+
+      if (e.key === 'Enter' && !e.shiftKey) { e.stopPropagation(); return; }
+
+      if (e.key === 'Tab') {
         e.preventDefault();
-        const ni=e.shiftKey?colIdx-1:colIdx+1;
-        if (ni>=0&&ni<colCnt) { rows[rowIdx].cells[ni].focus(); placeCursorAtEnd(rows[rowIdx].cells[ni]); }
-        else if (!e.shiftKey&&rowIdx<rows.length-1) { rows[rowIdx+1].cells[0].focus(); placeCursorAtEnd(rows[rowIdx+1].cells[0]); }
-        else if (e.shiftKey&&rowIdx>0) { rows[rowIdx-1].cells[colCnt-1].focus(); placeCursorAtEnd(rows[rowIdx-1].cells[colCnt-1]); }
+        const ni = e.shiftKey ? colIdx - 1 : colIdx + 1;
+        if (ni >= 0 && ni < colCnt) { rows[rowIdx].cells[ni].focus(); placeCursorAtEnd(rows[rowIdx].cells[ni]); }
+        else if (!e.shiftKey && rowIdx < rows.length - 1) { rows[rowIdx+1].cells[0].focus(); placeCursorAtEnd(rows[rowIdx+1].cells[0]); }
+        else if (e.shiftKey && rowIdx > 0) { rows[rowIdx-1].cells[colCnt-1].focus(); placeCursorAtEnd(rows[rowIdx-1].cells[colCnt-1]); }
         return;
       }
-      if (e.key==='ArrowUp'&&rowIdx>0&&isCursorAtFirstLine(cell)) {
-        e.preventDefault(); const t=rows[rowIdx-1].cells[Math.min(colIdx,rows[rowIdx-1].cells.length-1)]; t.focus(); placeCursorAtEnd(t); return;
+      if (e.key === 'ArrowUp' && rowIdx > 0 && isCursorAtFirstLine(cell)) {
+        e.preventDefault();
+        const t = rows[rowIdx-1].cells[Math.min(colIdx, rows[rowIdx-1].cells.length-1)];
+        t.focus(); placeCursorAtEnd(t); return;
       }
-      if (e.key==='ArrowDown'&&rowIdx<rows.length-1) {
-        if (cell.offsetHeight<=40||isCursorAtLastLine(cell)) {
-          e.preventDefault(); const t=rows[rowIdx+1].cells[Math.min(colIdx,rows[rowIdx+1].cells.length-1)]; t.focus(); placeCursorAtEnd(t);
-        }
-        return;
-      }
-      if (e.key==='ArrowRight') {
-        const isLast=rowIdx===rows.length-1&&colIdx===colCnt-1;
-        if (isLast&&isCursorAtTextEnd(cell)) {
+      if (e.key === 'ArrowDown' && rowIdx < rows.length - 1) {
+        if (cell.offsetHeight <= 40 || isCursorAtLastLine(cell)) {
           e.preventDefault();
-          const wrap=tbl.closest('.note-table-wrap');
-          const next=wrap&&wrap.nextElementSibling;
-          if (next) { const ed=next.querySelector('[contenteditable="true"]'); if(ed){ed.focus();placeCursorAtStart(ed);} }
+          const t = rows[rowIdx+1].cells[Math.min(colIdx, rows[rowIdx+1].cells.length-1)];
+          t.focus(); placeCursorAtEnd(t);
         }
         return;
       }
-      if ((e.ctrlKey||e.metaKey)&&e.key==='a') {
+      if (e.key === 'ArrowRight') {
+        const isLast = rowIdx === rows.length-1 && colIdx === colCnt-1;
+        if (isLast && isCursorAtTextEnd(cell)) {
+          e.preventDefault();
+          const wrap = tbl.closest('.note-table-wrap');
+          const next = wrap && wrap.nextElementSibling;
+          if (next) { const ed = next.querySelector('[contenteditable="true"]'); if (ed) { ed.focus(); placeCursorAtStart(ed); } }
+        }
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault();
-        const sel2=window.getSelection(), r2=document.createRange();
-        if (sel2&&sel2.rangeCount>0&&sel2.getRangeAt(0).toString()===cell.textContent) {
-          r2.selectNodeContents(document.getElementById('editor-body'));
+        tblUndoAction(tbl.closest('.note-table-wrap'));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        tblRedoAction(tbl.closest('.note-table-wrap'));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+        e.preventDefault();
+        const sel2 = window.getSelection(), r2 = document.createRange();
+        if (sel2 && sel2.rangeCount > 0 && sel2.getRangeAt(0).toString() === cell.textContent) {
+          r2.selectNodeContents(document.getElementById('editor-body') || document.querySelector('.editor-page [contenteditable]'));
         } else { r2.selectNodeContents(cell); }
         sel2.removeAllRanges(); sel2.addRange(r2); return;
       }
@@ -1011,92 +1213,96 @@ function attachTableEvents(tbl) {
   });
 }
 
-// 컬럼 리사이즈 — 셀 밖 오버레이 방식
-function initColResizeOverlay(tbl) {
+// 열 경계선 핸들 재생성 — td 테두리 위에 직접 올리는 방식
+function rebuildColLines(tbl) {
   const wrap = tbl.closest('.note-table-wrap');
   if (!wrap) return;
 
-  // 기존 오버레이 제거
-  wrap.querySelectorAll('.col-resize-overlay').forEach(el=>el.remove());
+  // 기존 오버레이 제거 후 재생성
+  wrap.querySelectorAll('.col-resize-overlay').forEach(el => el.remove());
 
   const overlay = document.createElement('div');
   overlay.className = 'col-resize-overlay';
-  // tbl 바로 뒤에 삽입
-  tbl.after(overlay);
+  // wrap 기준 절대 위치
+  overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;pointer-events:none;z-index:4;';
+  wrap.appendChild(overlay);
 
-  function rebuildLines() {
-    overlay.innerHTML = '';
-    const tblRect = tbl.getBoundingClientRect();
-    const wrapRect = wrap.getBoundingClientRect();
-    const firstRow = tbl.rows[0]; if (!firstRow) return;
+  const firstRow = tbl.rows[0];
+  if (!firstRow) return;
 
-    // colgroup으로 너비 제어
-    let colgroup = tbl.querySelector('colgroup');
-    if (!colgroup) {
-      colgroup = document.createElement('colgroup');
-      Array.from(firstRow.cells).forEach(()=>{
-        const col = document.createElement('col');
-        colgroup.appendChild(col);
-      });
-      tbl.prepend(colgroup);
-    }
-    const cols = Array.from(colgroup.querySelectorAll('col'));
-
-    let cumX = 0;
-    Array.from(firstRow.cells).forEach((cell, ci) => {
-      cumX += cell.offsetWidth;
-      if (ci === firstRow.cells.length - 1) return; // 마지막 열 핸들 없음
-
-      const line = document.createElement('div');
-      line.className = 'col-resize-line';
-      line.style.left = (cumX - wrapRect.left + tblRect.left) + 'px';
-      line.style.height = tbl.offsetHeight + 'px';
-
-      let startX = 0, startW = 0, nextStartW = 0;
-      line.addEventListener('mousedown', e => {
-        e.preventDefault(); e.stopPropagation();
-        startX = e.clientX;
-        startW = cell.offsetWidth;
-        const nextCell = firstRow.cells[ci + 1];
-        nextStartW = nextCell ? nextCell.offsetWidth : 0;
-        line.classList.add('resizing');
-        document.body.classList.add('col-resizing');
-
-        const totalW = tbl.offsetWidth;
-
-        const onMove = me => {
-          const dx = me.clientX - startX;
-          const newW = Math.max(40, startW + dx);
-          const newNextW = Math.max(40, nextStartW - dx);
-          // colgroup col에 퍼센트로 적용
-          if (cols[ci]) cols[ci].style.width = (newW / totalW * 100).toFixed(2) + '%';
-          if (cols[ci+1]) cols[ci+1].style.width = (newNextW / totalW * 100).toFixed(2) + '%';
-        };
-        const onUp = () => {
-          line.classList.remove('resizing');
-          document.body.classList.remove('col-resizing');
-          document.removeEventListener('mousemove', onMove);
-          document.removeEventListener('mouseup', onUp);
-          rebuildLines(); // 핸들 위치 재계산
-          autoSave();
-        };
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
-      });
-      overlay.appendChild(line);
+  // colgroup 보장
+  let colgroup = tbl.querySelector('colgroup');
+  if (!colgroup) {
+    colgroup = document.createElement('colgroup');
+    const totalW = tbl.offsetWidth || 1;
+    Array.from(firstRow.cells).forEach(cell => {
+      const col = document.createElement('col');
+      col.style.width = (cell.offsetWidth / totalW * 100).toFixed(2) + '%';
+      colgroup.appendChild(col);
     });
+    tbl.prepend(colgroup);
   }
+  const cols = Array.from(colgroup.querySelectorAll('col'));
 
-  rebuildLines();
-  // ResizeObserver로 표 크기 바뀔 때마다 핸들 재배치
-  if (window.ResizeObserver) {
-    const ro = new ResizeObserver(()=>rebuildLines());
-    ro.observe(tbl);
+  // tbl의 wrap 내 상대 위치
+  const tblLeft = tbl.offsetLeft;
+  let cumX = tblLeft;
+
+  Array.from(firstRow.cells).forEach((cell, ci) => {
+    cumX += cell.offsetWidth;
+    if (ci === firstRow.cells.length - 1) return;
+
+    const line = document.createElement('div');
+    line.className = 'col-resize-line';
+    line.style.cssText = `position:absolute;top:0;left:${cumX - 3}px;width:6px;height:${tbl.offsetHeight}px;cursor:col-resize;pointer-events:all;background:transparent;transition:background 0.12s;z-index:5;`;
+
+    let startX = 0, startW = 0, nextW = 0;
+    const totalW = tbl.offsetWidth;
+
+    line.addEventListener('mouseenter', () => { line.style.background = 'rgba(233,69,96,0.35)'; });
+    line.addEventListener('mouseleave', () => { if (!line._dragging) line.style.background = 'transparent'; });
+
+    line.addEventListener('mousedown', e => {
+      e.preventDefault(); e.stopPropagation();
+      line._dragging = true;
+      startX = e.clientX;
+      startW = cell.offsetWidth;
+      nextW = firstRow.cells[ci+1] ? firstRow.cells[ci+1].offsetWidth : 0;
+      line.style.background = 'rgba(233,69,96,0.5)';
+      document.body.classList.add('col-resizing');
+
+      const onMove = me => {
+        const dx = me.clientX - startX;
+        const nw = Math.max(40, startW + dx);
+        const nnw = Math.max(40, nextW - dx);
+        if (cols[ci]) cols[ci].style.width = (nw / totalW * 100).toFixed(2) + '%';
+        if (cols[ci+1]) cols[ci+1].style.width = (nnw / totalW * 100).toFixed(2) + '%';
+      };
+      const onUp = () => {
+        line._dragging = false;
+        line.style.background = 'transparent';
+        document.body.classList.remove('col-resizing');
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        rebuildColLines(tbl);
+        autoSave();
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    overlay.appendChild(line);
+  });
+
+  // 표 높이 변할 때 핸들 높이 갱신
+  if (!tbl._roAttached) {
+    tbl._roAttached = true;
+    if (window.ResizeObserver) {
+      new ResizeObserver(() => rebuildColLines(tbl)).observe(tbl);
+    }
   }
 }
 
-// ══════════════════════════════════════════
-//  PAGE MANAGEMENT
 // ══════════════════════════════════════════
 const PAGE_H = 1123; // A4 px 높이 (96dpi)
 const PAGE_PAD_Y = 52; // 상하 패딩
@@ -1175,6 +1381,71 @@ function goToPageInput() {
   goToPage(idx);
 }
 
+// 현재 보이는 페이지 인덱스
+function getCurrentPageIdx() {
+  const inp = document.getElementById('page-input');
+  if (inp) return Math.max(0, parseInt(inp.value) - 1) || 0;
+  return 0;
+}
+
+function showDeletePageModal() {
+  const total = document.querySelectorAll('.editor-page').length;
+  const cur = getCurrentPageIdx() + 1;
+  // 페이지 번호 옵션 목록
+  const options = Array.from({length: total}, (_, i) =>
+    `<option value="${i}">${i+1}페이지${i===cur-1?' (현재)':''}</option>`
+  ).join('');
+  showModal(`
+    <h3>🗑 페이지 삭제</h3>
+    <p style="font-size:13px;color:var(--subtext);margin-bottom:14px">삭제할 페이지를 선택하거나 전체를 삭제하세요.</p>
+    <label style="font-size:13px;color:var(--subtext)">삭제할 페이지</label>
+    <select id="m-del-page" style="margin-bottom:14px">${options}</select>
+    <div class="modal-btns" style="flex-wrap:wrap;gap:8px">
+      <button class="modal-btn cancel" onclick="closeModal()">취소</button>
+      <button class="modal-btn confirm" onclick="deleteSelectedPage()" style="background:var(--accent)">선택 페이지 삭제</button>
+      <button class="modal-btn confirm" onclick="deleteAllPages()" style="background:#c0392b">전체 페이지 삭제</button>
+    </div>
+  `);
+}
+
+function deleteSelectedPage() {
+  const sel = document.getElementById('m-del-page');
+  if (!sel) return;
+  const idx = parseInt(sel.value);
+  const pages = document.querySelectorAll('.editor-page');
+  if (pages.length <= 1) { toast('마지막 페이지는 삭제할 수 없어요'); closeModal(); return; }
+  pages[idx].remove();
+  closeModal();
+  updatePageNumbers();
+  // 커서를 앞 페이지로
+  const newPages = document.querySelectorAll('.editor-page');
+  const newIdx = Math.min(idx, newPages.length - 1);
+  goToPage(newIdx);
+  autoSave();
+  toast(`${idx+1}페이지를 삭제했어요`);
+}
+
+function deleteAllPages() {
+  if (!confirm('모든 페이지 내용을 삭제할까요?')) return;
+  closeModal();
+  const container = document.getElementById('pages-container');
+  container.innerHTML = '';
+  // 빈 첫 페이지 생성
+  const page = document.createElement('div');
+  page.className = 'editor-page';
+  const body = document.createElement('div');
+  body.contentEditable = 'true'; body.spellcheck = false;
+  body.id = 'editor-body';
+  body.style.cssText = `outline:none;font-size:14.5px;line-height:1.9;font-family:var(--font-main);color:var(--text);min-height:${PAGE_CONTENT_H}px;word-break:break-word;width:100%;`;
+  body.addEventListener('input', onEditorInput);
+  page.appendChild(body);
+  container.appendChild(page);
+  updatePageNumbers();
+  body.focus();
+  autoSave();
+  toast('전체 페이지를 삭제했어요');
+}
+
 // 모든 페이지 body의 innerHTML을 합쳐서 저장
 function getAllHtml() {
   const pages = document.querySelectorAll('.editor-page [contenteditable]');
@@ -1228,7 +1499,7 @@ function onEditorInput(e) {
     if (node.nodeType === Node.TEXT_NODE) {
       const offset = range.startOffset;
       const text = node.textContent;
-      const newText = text.replace(/<->/g,'↔').replace(/->/g,'→').replace(/<-/g,'←');
+      const newText = text.replace(/<&>/g,'↔').replace(/->/g,'→').replace(/<-/g,'←');
       if (newText !== text) {
         node.textContent = newText;
         try {
@@ -1276,51 +1547,125 @@ function tblDelCol(btn) {
   if(tbl.rows[0]?.cells.length>1){Array.from(tbl.rows).forEach(r=>{if(r.cells.length>0)r.deleteCell(r.cells.length-1);});autoSave();}else toast('열이 1개라 삭제 불가');
 }
 function tblMerge(btn) {
-  const wrap=btn.closest('.note-table-wrap');
-  const cells=wrap.querySelectorAll('.selected-cell');
-  if(cells.length<2){toast('Ctrl+클릭으로 셀 2개 이상 선택');return;}
-  const combined=Array.from(cells).map(c=>c.innerHTML).filter(h=>h.trim()).join(' ');
-  const first=cells[0]; first.innerHTML=combined||''; first.colSpan=cells.length; first.classList.remove('selected-cell');
-  for(let i=1;i<cells.length;i++) cells[i].remove();
-  _selCells=[]; autoSave(); toast('병합됐어요!');
+  const wrap = btn.closest('.note-table-wrap');
+  const tbl = wrap.querySelector('.note-table');
+  const cells = wrap.querySelectorAll('.selected-cell');
+  if (cells.length < 2) { toast('Ctrl+클릭으로 셀 2개 이상 선택'); return; }
+  tblSnapshot(wrap);
+  const combined = Array.from(cells).map(c => c.innerHTML).filter(h => h.trim()).join(' ');
+  const first = cells[0];
+  first.innerHTML = combined || '';
+  first.colSpan = cells.length;
+  first.classList.remove('selected-cell');
+  for (let i = 1; i < cells.length; i++) cells[i].remove();
+  _selCells = [];
+  const colgroup = tbl.querySelector('colgroup');
+  if (colgroup) {
+    const remaining = tbl.rows[0]?.cells.length || 1;
+    const pct = (100 / remaining).toFixed(2) + '%';
+    while (colgroup.children.length > remaining) colgroup.lastChild.remove();
+    while (colgroup.children.length < remaining) { const c = document.createElement('col'); c.style.width = pct; colgroup.appendChild(c); }
+    colgroup.querySelectorAll('col').forEach(c => c.style.width = pct);
+  }
+  rebuildColLines(tbl);
+  autoSave(); toast('병합됐어요!');
 }
+
 function tblSplit(btn) {
-  const wrap=btn.closest('.note-table-wrap');
-  wrap.querySelectorAll('.selected-cell').forEach(cell=>{
-    const span=parseInt(cell.colSpan)||1; if(span<2) return;
-    cell.colSpan=1; const row=cell.parentElement;
-    for(let i=1;i<span;i++){const nc=document.createElement('td');nc.contentEditable='true';row.insertBefore(nc,cell.nextSibling);}
+  const wrap = btn.closest('.note-table-wrap');
+  const tbl = wrap.querySelector('.note-table');
+  const selected = wrap.querySelectorAll('.selected-cell');
+  if (!selected.length) { toast('Ctrl+클릭으로 병합된 셀을 선택하세요'); return; }
+  let didSplit = false;
+  tblSnapshot(wrap);
+  selected.forEach(cell => {
+    const span = parseInt(cell.colSpan) || 1;
+    if (span < 2) return;
+    cell.colSpan = 1;
+    const row = cell.parentElement;
+    for (let i = 1; i < span; i++) {
+      const nc = document.createElement('td');
+      nc.contentEditable = 'true';
+      row.insertBefore(nc, cell.nextSibling);
+    }
     cell.classList.remove('selected-cell');
+    didSplit = true;
   });
-  _selCells=[]; const tbl=wrap.querySelector('.note-table'); if(tbl){tbl.querySelectorAll('td,th').forEach(c=>c._ev=false);attachTableEvents(tbl);}
+  if (!didSplit) { toast('colSpan 2 이상인 셀을 선택하세요'); return; }
+  _selCells = [];
+  const firstRow = tbl.rows[0];
+  if (firstRow) {
+    let colgroup = tbl.querySelector('colgroup');
+    if (!colgroup) { colgroup = document.createElement('colgroup'); tbl.prepend(colgroup); }
+    const cnt = firstRow.cells.length;
+    colgroup.innerHTML = '';
+    const pct = (100 / cnt).toFixed(2) + '%';
+    for (let i = 0; i < cnt; i++) { const c = document.createElement('col'); c.style.width = pct; colgroup.appendChild(c); }
+  }
+  tbl.querySelectorAll('td,th').forEach(c => c._ev = false);
+  attachTableEvents(tbl);
   autoSave(); toast('분할됐어요!');
 }
+
+function tblEqualRows(btn) {
+  const wrap = btn.closest('.note-table-wrap');
+  const tbl = wrap.querySelector('.note-table');
+  if (!tbl) return;
+  tblSnapshot(wrap);
+  const selInTable = _selCells.filter(c => wrap.contains(c));
+  let targetRows;
+  if (selInTable.length > 0) {
+    const rowIdxSet = new Set(selInTable.map(c => c.parentElement.rowIndex));
+    targetRows = Array.from(tbl.rows).filter((_, i) => rowIdxSet.has(i));
+    toast(rowIdxSet.size + '개 행 높이 균등 적용');
+  } else {
+    targetRows = Array.from(tbl.rows);
+    toast('전체 행 높이 균등 적용');
+  }
+  if (!targetRows.length) return;
+  targetRows.forEach(row => Array.from(row.cells).forEach(cell => { cell.style.height = ''; cell.style.minHeight = ''; }));
+  void tbl.offsetHeight;
+  const maxH = Math.max(...targetRows.map(row => row.offsetHeight));
+  targetRows.forEach(row => {
+    Array.from(row.cells).forEach(cell => {
+      cell.style.minHeight = maxH + 'px';
+      cell.style.height = maxH + 'px';
+    });
+  });
+  autoSave();
+}
+
+let _lastFocusedCell = null;
 function tblInsertImg(btn) {
-  const wrap=btn.closest('.note-table-wrap');
-  const cell=wrap.querySelector('.selected-cell')||wrap.querySelector('td,th');
-  if(!cell){toast('셀을 먼저 클릭하세요');return;}
-  const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.style.display='none';document.body.appendChild(inp);
-  inp.onchange=e=>{
-    const file=e.target.files[0];if(!file){inp.remove();return;}
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      const imgWrap=document.createElement('span');
-      imgWrap.style.cssText='display:inline-block;position:relative;';
-      const img=document.createElement('img');
-      img.src=ev.target.result;
-      img.style.cssText='max-width:100%;border-radius:6px;border:1px solid var(--border);display:block;margin-top:4px';
-      // 이미지 삭제 버튼
-      const delBtn=document.createElement('button');
-      delBtn.textContent='✕';
-      delBtn.title='이미지 삭제';
-      delBtn.style.cssText='position:absolute;top:6px;right:2px;background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0;opacity:0;transition:opacity 0.15s;';
-      delBtn.addEventListener('click',e2=>{e2.preventDefault();e2.stopPropagation();imgWrap.remove();autoSave();toast('이미지 삭제됐어요');});
-      imgWrap.addEventListener('mouseenter',()=>delBtn.style.opacity='1');
-      imgWrap.addEventListener('mouseleave',()=>delBtn.style.opacity='0');
-      imgWrap.appendChild(img);
-      imgWrap.appendChild(delBtn);
+  const wrap = btn.closest('.note-table-wrap');
+  const cell = (wrap.contains(_lastFocusedCell) ? _lastFocusedCell : null)
+    || wrap.querySelector('.selected-cell')
+    || wrap.querySelector('td,th');
+  if (!cell) { toast('셀을 먼저 클릭하세요'); return; }
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*'; inp.style.display = 'none';
+  document.body.appendChild(inp);
+  inp.onchange = e => {
+    const file = e.target.files[0]; if (!file) { inp.remove(); return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const imgWrap = document.createElement('span');
+      imgWrap.style.cssText = 'display:inline-block;position:relative;';
+      const img = document.createElement('img');
+      img.src = ev.target.result;
+      img.style.cssText = 'max-width:100%;border-radius:6px;border:1px solid var(--border);display:block;margin-top:4px';
+      const delBtn = document.createElement('button');
+      delBtn.textContent = '\u2715';
+      delBtn.title = '이미지 삭제';
+      delBtn.style.cssText = 'position:absolute;top:6px;right:2px;background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0;opacity:0;transition:opacity 0.15s;';
+      delBtn.addEventListener('click', e2 => { e2.preventDefault(); e2.stopPropagation(); imgWrap.remove(); autoSave(); toast('이미지 삭제됐어요'); });
+      imgWrap.addEventListener('mouseenter', () => delBtn.style.opacity = '1');
+      imgWrap.addEventListener('mouseleave', () => delBtn.style.opacity = '0');
+      imgWrap.appendChild(img); imgWrap.appendChild(delBtn);
       cell.appendChild(imgWrap);
-      cell.classList.remove('selected-cell');_selCells=_selCells.filter(c=>c!==cell);inp.remove();autoSave();toast('이미지 삽입됐어요!');
+      cell.classList.remove('selected-cell');
+      _selCells = _selCells.filter(c => c !== cell);
+      inp.remove(); autoSave(); toast('이미지 삽입됐어요!');
     };
     reader.readAsDataURL(file);
   };
