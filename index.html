@@ -1530,7 +1530,17 @@ function deleteAllPages() {
 // 모든 페이지 body의 innerHTML을 합쳐서 저장
 function getAllHtml() {
   const pages = document.querySelectorAll('.editor-page [contenteditable]');
-  return Array.from(pages).map(b => b.innerHTML).join('<hr class="page-break" style="border:none;margin:0;page-break-after:always;">');
+  return Array.from(pages).map(b => {
+    // 저장 전 표 셀의 불필요한 wrapper div 정리
+    const clone = b.cloneNode(true);
+    clone.querySelectorAll('td, th').forEach(cell => {
+      // 셀 안이 <div>하나뿐이면 언래핑
+      if (cell.children.length === 1 && cell.firstElementChild.tagName === 'DIV' && !cell.firstElementChild.className) {
+        cell.innerHTML = cell.firstElementChild.innerHTML;
+      }
+    });
+    return clone.innerHTML;
+  }).join('<hr class="page-break" style="border:none;margin:0;page-break-after:always;">');
 }
 
 // 저장된 HTML을 페이지별로 복원
@@ -2030,34 +2040,50 @@ function applyAlign(dir) {
 //  EXAM + PDF
 // ══════════════════════════════════════════
 function buildExamParts(title, html) {
-  const tmp=document.createElement('div');
-  tmp.innerHTML=html;
-  tmp.querySelectorAll('.table-toolbar,.col-resize-handle').forEach(el=>el.remove());
-  tmp.querySelectorAll('.note-table-wrap').forEach(w=>w.removeAttribute('contenteditable'));
-  const answers=[];
-  let idx=0;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+
+  // UI 요소 제거
+  tmp.querySelectorAll('.table-toolbar, .col-resize-overlay, .tbl-resize-handle, .tbl-row-resize-handle').forEach(el => el.remove());
+  tmp.querySelectorAll('.note-table-wrap').forEach(w => w.removeAttribute('contenteditable'));
+  // 표 셀 contenteditable 유지하되 선택 표시 제거
+  tmp.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
+
+  const answers = [];
+  let idx = 0;
+
   function procNode(node) {
-    if (node.nodeType===Node.TEXT_NODE) {
+    if (node.nodeType === Node.TEXT_NODE) {
       if (node.textContent.includes('`')) {
-        const span=document.createElement('span');
-        span.innerHTML=node.textContent.replace(/`([^`]+)`/g,(_,inner)=>{
-          idx++; answers.push({num:idx,answer:inner});
-          return `<span style="display:inline-block;border-bottom:2px solid #333;min-width:${Math.max(50,inner.length*10)}px;margin:0 2px;position:relative"><sup style="font-size:9px;color:#999;position:absolute;top:0;left:1px">${idx}</sup></span>`;
+        const span = document.createElement('span');
+        span.innerHTML = node.textContent.replace(/`([^`]+)`/g, (_, inner) => {
+          idx++;
+          answers.push({ num: idx, answer: inner });
+          return `<span style="display:inline-block;border-bottom:2px solid #333;min-width:${Math.max(50, inner.length * 10)}px;margin:0 2px;position:relative"><sup style="font-size:9px;color:#999;position:absolute;top:0;left:1px">${idx}</sup></span>`;
         });
         node.replaceWith(span);
       }
-    } else if (node.childNodes) { Array.from(node.childNodes).forEach(procNode); }
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      // 표 셀(td, th) 처리 — innerHTML에서 텍스트 직접 추출
+      if (node.nodeName === 'TD' || node.nodeName === 'TH') {
+        // 셀 안의 텍스트 노드들을 재귀 처리
+        Array.from(node.childNodes).forEach(procNode);
+        return;
+      }
+      Array.from(node.childNodes).forEach(procNode);
+    }
   }
+
   procNode(tmp);
 
-  const examHTML=`<div style="max-width:800px;margin:0 auto;padding:40px;font-family:'Nanum Myeongjo',serif;line-height:2;">
+  const examHTML = `<div style="max-width:800px;margin:0 auto;padding:40px;font-family:'Nanum Myeongjo',serif;line-height:2;">
     <div style="text-align:center;margin-bottom:28px;border-bottom:3px double #000;padding-bottom:14px;">
-      <h1 style="font-size:22px;margin-bottom:4px">${title||'시험지'}</h1>
+      <h1 style="font-size:22px;margin-bottom:4px">${title || '시험지'}</h1>
       <p style="font-size:13px;color:#666">이름: ___________________ &nbsp; 날짜: ${new Date().toLocaleDateString('ko-KR')} &nbsp; 점수: _______</p>
     </div>${tmp.innerHTML}
     <div style="margin-top:36px;border-top:2px solid #000;padding-top:12px;font-size:12px;color:#666">※ 빈칸에 알맞은 내용을 채워넣으시오.</div></div>`;
 
-  return {examHTML,answers};
+  return { examHTML, answers };
 }
 
 function buildAnswerSheet(title, answers) {
