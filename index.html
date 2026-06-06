@@ -829,11 +829,34 @@ function insertNodeAtCursor(node) {
   autoSave();
 }
 
+// range가 속한 contenteditable 요소를 찾아 focus하고 selection 복원
+function focusAndRestoreSelection() {
+  if (!_savedRange) return false;
+  // range가 속한 contenteditable 찾기
+  let node = _savedRange.commonAncestorContainer;
+  let editableEl = null;
+  while (node && node !== document.documentElement) {
+    if (node.nodeType === 1 && node.isContentEditable) {
+      editableEl = node;
+      break;
+    }
+    node = node.parentNode;
+  }
+  if (editableEl) {
+    editableEl.focus();
+    // focus 후 selection 재적용
+    const sel = window.getSelection();
+    try {
+      sel.removeAllRanges();
+      sel.addRange(_savedRange.cloneRange());
+      return true;
+    } catch(e) {}
+  }
+  return false;
+}
+
 function insertH1() {
-  restoreSelection();
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) {
-    // 커서 없으면 현재 페이지 끝에 추가
+  if (!focusAndRestoreSelection()) {
     const body = getEditorBody(); body.focus(); placeCursorAtEnd(body);
   }
   document.execCommand('formatBlock', false, 'h1');
@@ -849,9 +872,7 @@ function insertH1() {
 }
 
 function insertH2() {
-  restoreSelection();
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) {
+  if (!focusAndRestoreSelection()) {
     const body = getEditorBody(); body.focus(); placeCursorAtEnd(body);
   }
   document.execCommand('formatBlock', false, 'h2');
@@ -867,9 +888,7 @@ function insertH2() {
 }
 
 function insertOL() {
-  restoreSelection();
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) { const body = getEditorBody(); body.focus(); placeCursorAtEnd(body); }
+  if (!focusAndRestoreSelection()) { const body = getEditorBody(); body.focus(); placeCursorAtEnd(body); }
   document.execCommand('insertOrderedList', false, null);
   setTimeout(() => {
     document.querySelectorAll('.editor-page ol:not(.note-ol)').forEach(ol => ol.classList.add('note-ol'));
@@ -878,9 +897,7 @@ function insertOL() {
 }
 
 function insertUL() {
-  restoreSelection();
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) { const body = getEditorBody(); body.focus(); placeCursorAtEnd(body); }
+  if (!focusAndRestoreSelection()) { const body = getEditorBody(); body.focus(); placeCursorAtEnd(body); }
   document.execCommand('insertUnorderedList', false, null);
   setTimeout(() => {
     document.querySelectorAll('.editor-page ul:not(.note-ul)').forEach(ul => ul.classList.add('note-ul'));
@@ -1768,28 +1785,18 @@ function restoreSelection() {
 }
 
 function fmt(cmd) {
-  // 다중 선택 셀: 각 셀 전체 텍스트에 execCommand 적용
   if (_savedSelCells.length > 0) {
     _savedSelCells.forEach(cell => {
       cell.focus();
       const r = document.createRange();
       r.selectNodeContents(cell);
       const s = window.getSelection();
-      s.removeAllRanges();
-      s.addRange(r);
+      s.removeAllRanges(); s.addRange(r);
       document.execCommand(cmd, false, null);
     });
     autoSave(); return;
   }
-  restoreSelection();
-  const sel = window.getSelection();
-  if (sel && sel.anchorNode) {
-    let node = sel.anchorNode;
-    while (node && node !== document.body) {
-      if ((node.nodeName === 'TD' || node.nodeName === 'TH') && node.isContentEditable) { node.focus(); break; }
-      node = node.parentNode;
-    }
-  }
+  focusAndRestoreSelection() || (() => { const b = getEditorBody(); b.focus(); })();
   document.execCommand(cmd, false, null);
   autoSave();
 }
