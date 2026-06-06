@@ -1773,10 +1773,10 @@ function onEditorInput(e) {
 }
 
 // ── 노트 PDF ───────────────────────────────────
-function makePaperClone(extraStyle) {
+function makePaperClone() {
   const paper = document.getElementById('editor-paper');
   const clone = paper.cloneNode(true);
-  clone.style.cssText = `position:fixed;left:-9999px;top:0;width:794px;background:#fff;padding:${PAGE_PAD_Y}px ${PAGE_PAD_X}px;box-sizing:border-box;z-index:-1;background-image:none;${extraStyle||''}`;
+  clone.style.cssText = `width:794px;background:#fff;padding:${PAGE_PAD_Y}px ${PAGE_PAD_X}px;box-sizing:border-box;background-image:none;`;
   clone.querySelectorAll('.tbl-drag-handle,.tbl-resize-handle,.tbl-row-resize-handle,.col-resize-overlay,.table-toolbar,.tbl-drop-line,#page-break-labels').forEach(el => el.remove());
   clone.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
   clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
@@ -1788,40 +1788,60 @@ function makePaperClone(extraStyle) {
   return clone;
 }
 
-async function captureAndSlice(el, pdf, pW, isFirst) {
-  document.body.appendChild(el);
-  await new Promise(r => setTimeout(r, 120));
+// 페이지별 클립 캡처 — 각 페이지를 정확히 794×PAGE_H 컨테이너로 잘라 캡처
+async function captureByPage(sourceEl, pdf, isFirst) {
+  const pW = pdf.internal.pageSize.getWidth();   // ≈793.70
+  const pH = pdf.internal.pageSize.getHeight();  // ≈1122.52
 
-  const canvas = await html2canvas(el, {
-    scale: 2, useCORS: true, allowTaint: true,
-    backgroundColor: '#ffffff',
-    width: 794, windowWidth: 794, logging: false
-  });
-  document.body.removeChild(el);
+  // PAGE_H를 jsPDF 실제 치수 기반으로 계산 (CSS 794px → PDF pW)
+  // 1px(CSS) = pW/794 pt(PDF), 소수 오차 최소화
+  const PAGE_H_CSS = Math.round(pH * 794 / pW);  // ≈1123
 
-  const iW    = canvas.width;                              // 794*2 = 1588
-  const iH    = canvas.height;
-  const pH    = pdf.internal.pageSize.getHeight();         // jsPDF A4 정확값 (≈1122.52px)
-  const ratio = pW / iW;                                   // ≈ 0.4998
-  // 한 PDF 페이지에 정확히 채워지는 캔버스 픽셀 수
-  // pH / ratio = pH * iW / pW  (floating point 오차 최소화)
-  const sliceH = Math.round(pH * iW / pW);
+  // 먼저 소스 엘리먼트를 DOM에 붙여서 실제 높이 측정
+  const measurer = sourceEl.cloneNode(true);
+  measurer.style.cssText = [
+    'position:fixed','left:-9999px','top:0','z-index:-1',
+    'width:794px','background:#fff','visibility:hidden'
+  ].join(';');
+  document.body.appendChild(measurer);
+  await new Promise(r => setTimeout(r, 100));
+  const totalH = measurer.scrollHeight;
+  document.body.removeChild(measurer);
 
-  let yPos = 0, pageNum = 0;
-  while (yPos < iH - 1) {
-    const sH  = Math.min(sliceH, iH - yPos);
-    const sc  = document.createElement('canvas');
-    sc.width  = iW;
-    sc.height = Math.ceil(sH);
-    const ctx = sc.getContext('2d');
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, iW, sc.height);
-    ctx.drawImage(canvas, 0, yPos, iW, sH, 0, 0, iW, sH);
-    if (!isFirst || pageNum > 0) pdf.addPage();
-    // PDF에 정확히 A4 한 페이지를 채움
-    pdf.addImage(sc.toDataURL('image/png'), 'PNG', 0, 0, pW, Math.min(pH, sH * ratio));
-    yPos += sliceH;
-    pageNum++;
+  const totalPages = Math.ceil(totalH / PAGE_H_CSS);
+
+  for (let i = 0; i < totalPages; i++) {
+    // 클리퍼: 정확히 한 A4 페이지 크기
+    const clipper = document.createElement('div');
+    clipper.style.cssText = [
+      'position:fixed','left:-9999px','top:0','z-index:-1',
+      'width:794px',`height:${PAGE_H_CSS}px`,
+      'overflow:hidden','background:#fff'
+    ].join(';');
+
+    // 콘텐츠: margin-top으로 해당 페이지 구간만 보이게
+    const inner = sourceEl.cloneNode(true);
+    inner.style.cssText = [
+      'width:794px',
+      `margin-top:${-i * PAGE_H_CSS}px`,
+      'background:#fff','background-image:none'
+    ].join(';');
+
+    clipper.appendChild(inner);
+    document.body.appendChild(clipper);
+    await new Promise(r => setTimeout(r, 80));
+
+    const canvas = await html2canvas(clipper, {
+      scale: 2, useCORS: true, allowTaint: true,
+      backgroundColor: '#ffffff',
+      width: 794, height: PAGE_H_CSS,
+      windowWidth: 794, logging: false
+    });
+    document.body.removeChild(clipper);
+
+    if (!isFirst || i > 0) pdf.addPage();
+    // 캔버스를 정확히 PDF 한 페이지 크기로 삽입
+    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, pW, pH);
   }
 }
 
@@ -1834,7 +1854,7 @@ async function savePDF() {
     const pdf = new jsPDF({orientation:'p', unit:'px', format:'a4'});
     const pW = pdf.internal.pageSize.getWidth();
     const clone = makePaperClone();
-    await captureAndSlice(clone, pdf, pW, true);
+    await captureByPage(clone, pdf, true);
     const title = (document.getElementById('editor-big-title').value||'노트').replace(/[\/\\?%*:|"<>]/g,'-');
     pdf.save(title+'.pdf');
     toast('✅ PDF 저장됐어요!');
@@ -1893,39 +1913,31 @@ async function buildAndSaveExamPDF(html, filename) {
     await new Promise(r => setTimeout(r, 50));
     const {jsPDF} = window.jspdf;
     const pdf = new jsPDF({orientation:'p', unit:'px', format:'a4'});
-    const pW = pdf.internal.pageSize.getWidth();
     const answers = [], idxRef = {idx:0};
 
     msg.textContent = '📄 시험지 준비 중...';
 
-    // 노트와 동일한 wrapper — 백틱만 밑줄 변환
-    const wrapper = document.createElement('div');
-    wrapper.style.cssText = `position:fixed;left:-9999px;top:0;width:794px;background:#fff;padding:${PAGE_PAD_Y}px ${PAGE_PAD_X}px;box-sizing:border-box;z-index:-1;font-family:'Nanum Gothic',sans-serif;font-size:14.5px;line-height:1.9;color:#2d2d2d;`;
-    wrapper.innerHTML = html;
-    wrapper.querySelectorAll('.tbl-drag-handle,.tbl-resize-handle,.tbl-row-resize-handle,.col-resize-overlay,.table-toolbar,.tbl-drop-line,#page-break-labels').forEach(el => el.remove());
-    wrapper.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
-    wrapper.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
-    wrapper.querySelectorAll('td,th').forEach(cell => {
-      const bg = cell.style.backgroundColor;
-      if (bg && bg !== 'transparent') cell.style.background = bg;
-    });
-    wrapper.querySelectorAll('mark').forEach(m => { m.style.background = m.style.backgroundColor||'#fff176'; });
-    // 헤딩 인라인 스타일 (클래스 CSS가 없는 환경 대비)
-    wrapper.querySelectorAll('h1.note-h1').forEach(h => h.style.cssText = 'font-size:20px;font-weight:800;border-bottom:2.5px solid #0f3460;padding:4px 0;margin:10px 0 4px;color:#0f3460;');
-    wrapper.querySelectorAll('h2.note-h2').forEach(h => h.style.cssText = 'font-size:16px;font-weight:700;border-left:4px solid #e94560;padding:3px 10px;margin:8px 0 2px;');
-    wrapper.querySelectorAll('ol.note-ol').forEach(ol => { ol.style.paddingLeft='26px'; ol.style.margin='4px 0'; });
-    wrapper.querySelectorAll('ul.note-ul').forEach(ul => { ul.style.paddingLeft='22px'; ul.style.margin='4px 0'; });
+    // editor-paper와 완전히 동일한 클론 사용 (렌더링 일치 보장)
+    const clone = makePaperClone();
 
-    applyBlankTransform(wrapper, answers, idxRef);
+    // 클론 안의 editor-body 내용을 exam html로 교체
+    const bodyEl = clone.querySelector('#editor-body') || clone.querySelector('[contenteditable]') || clone;
+    if (bodyEl !== clone) {
+      bodyEl.innerHTML = html;
+      bodyEl.removeAttribute('contenteditable');
+    }
 
-    await captureAndSlice(wrapper, pdf, pW, true);
+    // 백틱 → 밑줄 빈칸 변환
+    applyBlankTransform(clone, answers, idxRef);
+
+    await captureByPage(clone, pdf, true);
 
     // 정답지
     if (answers.length > 0) {
       msg.textContent = '📄 정답지 생성 중...';
       const ansPages = buildAnswerPages(filename, answers, 794, PAGE_H);
       for (const ansDiv of ansPages) {
-        await captureAndSlice(ansDiv, pdf, pW, false);
+        await captureByPage(ansDiv, pdf, false);
       }
     }
 
@@ -1947,7 +1959,6 @@ function buildAnswerPages(title, answers, A4_W, A4_H) {
     const isFirst = start === 0;
     const div = document.createElement('div');
     div.style.cssText = [
-      'position:fixed', 'left:-9999px', 'top:0', 'z-index:-1',
       `width:794px`,
       `box-sizing:border-box`, `padding:${PAD_Y}px ${PAD_X}px`,
       `background:#fff`, `font-family:'Nanum Gothic',sans-serif`,
