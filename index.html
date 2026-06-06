@@ -328,9 +328,37 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   -webkit-user-select: text; user-select: text; cursor: text;
 }
 
-.table-toolbar { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; margin-bottom: 6px; }
+.table-toolbar { display: none !important; } /* 표 아래 툴바 숨김 — 상단 고정 툴바로 대체 */
 .tbl-btn { font-size: 11px; padding: 2px 8px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); cursor: pointer; font-family: var(--font-main); transition: all 0.12s; }
 .tbl-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ── 표 컨텍스트 툴바 (상단 고정) ── */
+#table-context-toolbar {
+  background: #fff8f0;
+  border-bottom: 1px solid var(--border);
+  border-top: 1px solid #ffd5a0;
+  padding: 5px 12px;
+  display: none;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: thin;
+}
+#table-context-toolbar.visible { display: flex; }
+#table-context-toolbar::-webkit-scrollbar { height: 3px; }
+#table-context-toolbar::-webkit-scrollbar-thumb { background: var(--border); }
+.tbl-ctx-label {
+  font-size: 11px; font-weight: 700; color: var(--accent);
+  margin-right: 4px; flex-shrink: 0; letter-spacing: 0.3px;
+}
+.tbl-ctx-sep {
+  width: 1px; height: 20px; background: var(--border); flex-shrink: 0; margin: 0 3px;
+}
+#table-context-toolbar .tbl-btn {
+  font-size: 12px; padding: 3px 10px;
+}
 
 /* 표 드래그 핸들 */
 .tbl-drag-handle {
@@ -513,6 +541,25 @@ body.tbl-dragging * { cursor: grabbing !important; user-select: none !important;
       <button class="tool-btn" id="aln-j" onclick="applyAlign('justify')" title="양쪽">
         <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2" width="14" height="2"/><rect x="1" y="6" width="14" height="2"/><rect x="1" y="10" width="14" height="2"/><rect x="1" y="14" width="14" height="2"/></svg>
       </button>
+    </div>
+
+    <!-- 표 컨텍스트 툴바 (표 셀 포커스 시 표시) -->
+    <div id="table-context-toolbar">
+      <span class="tbl-ctx-label">📊 표 편집</span>
+      <div class="tbl-ctx-sep"></div>
+      <button class="tbl-btn" id="tctx-add-row" onclick="tblCtxAction('addRow')">➕ 행 추가</button>
+      <button class="tbl-btn" id="tctx-del-row" onclick="tblCtxAction('delRow')">➖ 행 삭제</button>
+      <button class="tbl-btn" id="tctx-add-col" onclick="tblCtxAction('addCol')">➕ 열 추가</button>
+      <button class="tbl-btn" id="tctx-del-col" onclick="tblCtxAction('delCol')">➖ 열 삭제</button>
+      <div class="tbl-ctx-sep"></div>
+      <button class="tbl-btn" id="tctx-merge" onclick="tblCtxAction('merge')">병합</button>
+      <button class="tbl-btn" id="tctx-split" onclick="tblCtxAction('split')">분할</button>
+      <button class="tbl-btn" id="tctx-eq-rows" onclick="tblCtxAction('equalRows')">↕ 높이균등</button>
+      <button class="tbl-btn" id="tctx-eq-cols" onclick="tblCtxAction('equalCols')">↔ 너비균등</button>
+      <button class="tbl-btn" id="tctx-img" onclick="tblCtxAction('insertImg')">🖼️ 셀이미지</button>
+      <div class="tbl-ctx-sep"></div>
+      <button class="tbl-btn" id="tctx-del-tbl" onclick="tblCtxAction('deleteTable')" style="color:var(--accent)">✕ 표 삭제</button>
+      <span style="font-size:10px;color:var(--subtext);margin-left:6px;flex-shrink:0">Ctrl+클릭: 셀 선택 → 병합</span>
     </div>
 
     <!-- 제목/과목 헤더 -->
@@ -1130,7 +1177,7 @@ function applyTblSnapshot(wrap, snap) {
 function addTableResizeHandle(wrap) {
   wrap.querySelectorAll('.tbl-resize-handle, .tbl-row-resize-handle').forEach(h => h.remove());
 
-  // 가로 크기 핸들 (오른쪽)
+  // 가로 크기 핸들 (오른쪽 하단)
   const hHandle = document.createElement('div');
   hHandle.className = 'tbl-resize-handle';
   hHandle.title = '드래그로 표 너비 조절';
@@ -1155,41 +1202,70 @@ function addTableResizeHandle(wrap) {
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   });
+  // 행별 높이 핸들은 rebuildRowHandles에서 처리
+  rebuildRowHandles(wrap);
+}
 
-  // 세로 크기 핸들 (아래)
-  const vHandle = document.createElement('div');
-  vHandle.className = 'tbl-row-resize-handle';
-  vHandle.title = '드래그로 행 높이 조절';
-  wrap.appendChild(vHandle);
-  let startY2 = 0, startCellH = 0;
-  vHandle.addEventListener('mousedown', e => {
-    e.preventDefault(); e.stopPropagation();
-    startY2 = e.clientY;
-    const tbl = wrap.querySelector('.note-table');
-    const lastRow = tbl?.rows[tbl.rows.length - 1];
-    startCellH = lastRow?.offsetHeight || 40;
-    document.body.classList.add('row-resizing');
-    const onMove = me => {
-      const dy = me.clientY - startY2;
-      const newH = Math.max(28, startCellH + dy);
-      if (tbl) {
-        Array.from(tbl.rows).forEach(row => {
-          Array.from(row.cells).forEach(cell => {
-            cell.style.height = newH + 'px';
-            cell.style.minHeight = newH + 'px';
-          });
+// 각 행 아래에 드래그 핸들을 붙여 행 높이를 독립 조절
+function rebuildRowHandles(wrap) {
+  wrap.querySelectorAll('.tbl-row-resize-handle').forEach(h => h.remove());
+  const tbl = wrap.querySelector('.note-table');
+  if (!tbl) return;
+
+  Array.from(tbl.rows).forEach(row => {
+    const handle = document.createElement('div');
+    handle.className = 'tbl-row-resize-handle';
+    handle.title = '드래그로 행 높이 조절';
+
+    let startY = 0, startH = 0;
+    handle.addEventListener('mousedown', e => {
+      e.preventDefault(); e.stopPropagation();
+      startY = e.clientY;
+      startH = row.getBoundingClientRect().height;
+      document.body.classList.add('row-resizing');
+
+      const onMove = me => {
+        const newH = Math.max(28, startH + me.clientY - startY);
+        Array.from(row.cells).forEach(cell => {
+          cell.style.height = newH + 'px';
+          cell.style.minHeight = newH + 'px';
         });
-      }
-    };
-    const onUp = () => {
-      document.body.classList.remove('row-resizing');
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      autoSave();
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+        // 핸들 위치 갱신
+        positionHandle(handle, row);
+      };
+      const onUp = () => {
+        document.body.classList.remove('row-resizing');
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        autoSave();
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    wrap.appendChild(handle);
+    positionHandle(handle, row);
   });
+
+  // 표 크기 변화 시 핸들 위치 재계산
+  if (!tbl._rowHandleRO) {
+    tbl._rowHandleRO = true;
+    if (window.ResizeObserver) {
+      new ResizeObserver(() => rebuildRowHandles(wrap)).observe(tbl);
+    }
+  }
+}
+
+function positionHandle(handle, row) {
+  const wrapRect = handle.closest('.note-table-wrap')?.getBoundingClientRect();
+  const rowRect = row.getBoundingClientRect();
+  if (!wrapRect) return;
+  const top = rowRect.bottom - wrapRect.top - 4;
+  const left = rowRect.left - wrapRect.left;
+  handle.style.cssText = `position:absolute;left:${left}px;top:${top}px;width:${rowRect.width}px;height:8px;cursor:row-resize;z-index:10;background:transparent;display:flex;align-items:center;justify-content:center;`;
+  handle.innerHTML = '<span style="width:40px;height:3px;background:var(--accent);border-radius:3px;opacity:0;transition:opacity 0.15s;display:block"></span>';
+  handle.addEventListener('mouseenter', () => handle.querySelector('span').style.opacity='0.7');
+  handle.addEventListener('mouseleave', () => { if (!document.body.classList.contains('row-resizing')) handle.querySelector('span').style.opacity='0'; });
 }
 
 // ══════════════════════════════════════════
@@ -1206,12 +1282,14 @@ function selectTable(wrap) {
   }
   _selectedTableWrap = wrap;
   wrap.classList.add('table-selected');
+  showTableContextToolbar(wrap);
 }
 function deselectTable() {
   if (_selectedTableWrap) {
     _selectedTableWrap.classList.remove('table-selected');
     _selectedTableWrap = null;
   }
+  hideTableContextToolbar();
 }
 
 // 표 드래그 핸들에 이벤트 연결
@@ -1431,6 +1509,22 @@ document.addEventListener('mousedown', e => {
   if (_selectedTableWrap && !_selectedTableWrap.contains(e.target)) {
     deselectTable();
   }
+  // Ctrl 셀 선택: 표 바깥 클릭 시 해제 (표 안 클릭은 attachTableEvents에서 처리)
+  if (_selCells.length > 0) {
+    const clickedInAnyTable = e.target.closest('.note-table-wrap');
+    const toolbar = document.getElementById('table-context-toolbar');
+    if (!clickedInAnyTable && !toolbar?.contains(e.target)) {
+      _selCells.forEach(c => c.classList.remove('selected-cell'));
+      _selCells = [];
+    }
+  }
+  // 표 컨텍스트 툴바: 표 바깥 클릭 시 숨기기
+  if (_activeTableWrap && !_activeTableWrap.contains(e.target)) {
+    const toolbar = document.getElementById('table-context-toolbar');
+    if (!toolbar?.contains(e.target)) {
+      hideTableContextToolbar();
+    }
+  }
 }, true);
 
 // 표 클릭으로 선택 (셀 안 편집과 구분: 표 wrap 자체 클릭)
@@ -1454,13 +1548,22 @@ function attachTableEvents(tbl) {
           _selCells = _selCells.filter(c => c !== cell);
         }
       } else {
-        _selCells.forEach(c => c.classList.remove('selected-cell'));
-        _selCells = [];
+        // 같은 표 안 클릭이면 선택 유지, 다른 표거나 표 밖이면 해제
+        const clickedTable = tbl;
+        const hasForeignSel = _selCells.some(c => !clickedTable.contains(c));
+        if (hasForeignSel) {
+          _selCells.forEach(c => c.classList.remove('selected-cell'));
+          _selCells = [];
+        }
+        // 같은 표 내 일반 클릭은 선택 유지 (Ctrl 없이도 이미 선택된 셀은 그대로)
       }
     });
 
     cell.addEventListener('input', autoSave);
-    cell.addEventListener('focus', () => { _lastFocusedCell = cell; });
+    cell.addEventListener('focus', () => {
+      _lastFocusedCell = cell;
+      showTableContextToolbar(tbl.closest('.note-table-wrap'));
+    });
 
     const trackSel = () => {
       const s = window.getSelection();
@@ -1897,23 +2000,67 @@ function doRedo() {
 
 function getTbl(btn) { return btn.closest('.note-table-wrap').querySelector('.note-table'); }
 function tblAddRow(btn) {
-  const tbl=getTbl(btn), cols=tbl.rows[0]?.cells.length||3;
-  const tr=document.createElement('tr');
-  for(let c=0;c<cols;c++){const td=document.createElement('td');td.contentEditable='true';tr.appendChild(td);}
-  tbl.appendChild(tr); attachTableEvents(tbl); autoSave();
+  const tbl = getTbl(btn), cols = tbl.rows[0]?.cells.length || 3;
+  const wrap = tbl.closest('.note-table-wrap');
+  const tr = document.createElement('tr');
+  for (let c = 0; c < cols; c++) { const td = document.createElement('td'); td.contentEditable = 'true'; tr.appendChild(td); }
+  tbl.appendChild(tr);
+  attachTableEvents(tbl);
+  rebuildRowHandles(wrap);
+  autoSave();
 }
 function tblDelRow(btn) {
-  const tbl=getTbl(btn);
-  if(tbl.rows.length>1){tbl.deleteRow(tbl.rows.length-1);autoSave();}else toast('행이 1개라 삭제 불가');
+  const tbl = getTbl(btn);
+  const wrap = tbl.closest('.note-table-wrap');
+  if (tbl.rows.length > 1) { tbl.deleteRow(tbl.rows.length - 1); rebuildRowHandles(wrap); autoSave(); }
+  else toast('행이 1개라 삭제 불가');
 }
 function tblAddCol(btn) {
-  const tbl=getTbl(btn);
-  Array.from(tbl.rows).forEach((row,i)=>{ const c=i===0?document.createElement('th'):document.createElement('td'); c.contentEditable='true'; row.appendChild(c); });
-  attachTableEvents(tbl); autoSave();
+  const tbl = getTbl(btn);
+  const wrap = tbl.closest('.note-table-wrap');
+  tblSnapshot(wrap);
+  Array.from(tbl.rows).forEach((row, i) => {
+    const c = i === 0 ? document.createElement('th') : document.createElement('td');
+    c.contentEditable = 'true';
+    row.appendChild(c);
+  });
+  // colgroup 동기화
+  let colgroup = tbl.querySelector('colgroup');
+  const colCnt = tbl.rows[0]?.cells.length || 1;
+  if (colgroup) {
+    const pct = (100 / colCnt).toFixed(2) + '%';
+    colgroup.innerHTML = '';
+    for (let i = 0; i < colCnt; i++) {
+      const col = document.createElement('col');
+      col.style.width = pct;
+      colgroup.appendChild(col);
+    }
+  }
+  tbl.querySelectorAll('td,th').forEach(c => c._ev = false);
+  attachTableEvents(tbl);
+  rebuildColLines(tbl);
+  autoSave();
 }
 function tblDelCol(btn) {
-  const tbl=getTbl(btn);
-  if(tbl.rows[0]?.cells.length>1){Array.from(tbl.rows).forEach(r=>{if(r.cells.length>0)r.deleteCell(r.cells.length-1);});autoSave();}else toast('열이 1개라 삭제 불가');
+  const tbl = getTbl(btn);
+  const wrap = tbl.closest('.note-table-wrap');
+  if ((tbl.rows[0]?.cells.length || 0) <= 1) { toast('열이 1개라 삭제 불가'); return; }
+  tblSnapshot(wrap);
+  Array.from(tbl.rows).forEach(r => { if (r.cells.length > 0) r.deleteCell(r.cells.length - 1); });
+  // colgroup 동기화
+  let colgroup = tbl.querySelector('colgroup');
+  const colCnt = tbl.rows[0]?.cells.length || 1;
+  if (colgroup) {
+    const pct = (100 / colCnt).toFixed(2) + '%';
+    colgroup.innerHTML = '';
+    for (let i = 0; i < colCnt; i++) {
+      const col = document.createElement('col');
+      col.style.width = pct;
+      colgroup.appendChild(col);
+    }
+  }
+  rebuildColLines(tbl);
+  autoSave();
 }
 function tblMerge(btn) {
   const wrap = btn.closest('.note-table-wrap');
@@ -1981,6 +2128,7 @@ function tblEqualRows(btn) {
   const tbl = wrap.querySelector('.note-table');
   if (!tbl) return;
   tblSnapshot(wrap);
+
   const selInTable = _selCells.filter(c => wrap.contains(c));
   let targetRows;
   if (selInTable.length > 0) {
@@ -1992,19 +2140,119 @@ function tblEqualRows(btn) {
     toast('전체 행 높이 균등 적용');
   }
   if (!targetRows.length) return;
-  targetRows.forEach(row => Array.from(row.cells).forEach(cell => { cell.style.height = ''; cell.style.minHeight = ''; }));
-  void tbl.offsetHeight;
-  const maxH = Math.max(...targetRows.map(row => row.offsetHeight));
-  targetRows.forEach(row => {
-    Array.from(row.cells).forEach(cell => {
-      cell.style.minHeight = maxH + 'px';
-      cell.style.height = maxH + 'px';
-    });
+
+  // 1) 기존 고정 높이 제거 → 자연 높이로 리셋
+  targetRows.forEach(row => Array.from(row.cells).forEach(cell => {
+    cell.style.height = '';
+    cell.style.minHeight = '';
+  }));
+
+  // 2) 레이아웃 강제 flush 후 각 행 자연 높이 개별 측정
+  void tbl.getBoundingClientRect();
+  const heights = targetRows.map(row => {
+    // 행 안 모든 셀의 scrollHeight 중 최대값을 그 행의 실제 필요 높이로 사용
+    return Math.max(...Array.from(row.cells).map(c => c.scrollHeight || c.offsetHeight || 28));
   });
+  const maxH = Math.max(...heights);
+
+  // 3) 균등 높이 적용
+  targetRows.forEach(row => Array.from(row.cells).forEach(cell => {
+    cell.style.height = maxH + 'px';
+    cell.style.minHeight = maxH + 'px';
+  }));
+
+  rebuildRowHandles(wrap);
+  autoSave();
+}
+
+function tblEqualCols(btn) {
+  const wrap = btn.closest('.note-table-wrap');
+  const tbl = wrap.querySelector('.note-table');
+  if (!tbl) return;
+  tblSnapshot(wrap);
+
+  const selInTable = _selCells.filter(c => wrap.contains(c));
+  let targetColIdxs;
+  if (selInTable.length > 0) {
+    targetColIdxs = [...new Set(selInTable.map(c => c.cellIndex))].sort((a,b)=>a-b);
+    toast(targetColIdxs.length + '개 열 너비 균등 적용');
+  } else {
+    const colCnt = tbl.rows[0]?.cells.length || 1;
+    targetColIdxs = Array.from({length: colCnt}, (_, i) => i);
+    toast('전체 열 너비 균등 적용');
+  }
+  if (!targetColIdxs.length) return;
+
+  let colgroup = tbl.querySelector('colgroup');
+  if (!colgroup) {
+    colgroup = document.createElement('colgroup');
+    const cnt = tbl.rows[0]?.cells.length || 1;
+    for (let i = 0; i < cnt; i++) {
+      const col = document.createElement('col'); colgroup.appendChild(col);
+    }
+    tbl.prepend(colgroup);
+  }
+  const cols = Array.from(colgroup.querySelectorAll('col'));
+  const totalCols = cols.length;
+  if (!totalCols) return;
+
+  // 현재 각 열 너비 비율 파악
+  const wrapW = wrap.getBoundingClientRect().width || tbl.offsetWidth || 600;
+  const currentWidths = cols.map(col => {
+    const w = col.style.width;
+    if (w.endsWith('%')) return parseFloat(w);
+    return (tbl.rows[0]?.cells[cols.indexOf(col)]?.offsetWidth / wrapW * 100) || (100 / totalCols);
+  });
+
+  // 선택 열들의 총 비율을 균등 분배
+  const totalPct = targetColIdxs.reduce((s, i) => s + (currentWidths[i] || 100/totalCols), 0);
+  const equalPct = (totalPct / targetColIdxs.length).toFixed(2);
+
+  targetColIdxs.forEach(i => {
+    if (cols[i]) cols[i].style.width = equalPct + '%';
+  });
+
+  rebuildColLines(tbl);
   autoSave();
 }
 
 let _lastFocusedCell = null;
+let _activeTableWrap = null; // 현재 포커스된 표 wrap
+
+function showTableContextToolbar(wrap) {
+  _activeTableWrap = wrap;
+  document.getElementById('table-context-toolbar').classList.add('visible');
+}
+function hideTableContextToolbar() {
+  _activeTableWrap = null;
+  document.getElementById('table-context-toolbar')?.classList.remove('visible');
+}
+
+// 상단 툴바 표 편집 액션 — 현재 활성 표(wrap)에 위임
+function tblCtxAction(action) {
+  const wrap = _activeTableWrap || _selectedTableWrap;
+  if (!wrap) { toast('표를 클릭하세요'); return; }
+  // 각 기존 함수에 가짜 버튼 전달 (wrap 내부 버튼처럼 동작)
+  const fakeBtn = { closest: cls => cls === '.note-table-wrap' ? wrap : null };
+  switch (action) {
+    case 'addRow':    tblAddRow(fakeBtn); break;
+    case 'delRow':    tblDelRow(fakeBtn); break;
+    case 'addCol':    tblAddCol(fakeBtn); break;
+    case 'delCol':    tblDelCol(fakeBtn); break;
+    case 'merge':     tblMerge(fakeBtn); break;
+    case 'split':     tblSplit(fakeBtn); break;
+    case 'equalRows': tblEqualRows(fakeBtn); break;
+    case 'equalCols': tblEqualCols(fakeBtn); break;
+    case 'insertImg': tblInsertImg(fakeBtn); break;
+    case 'deleteTable':
+      if (confirm('이 표를 삭제할까요?')) {
+        wrap.remove();
+        hideTableContextToolbar();
+        autoSave();
+      }
+      break;
+  }
+}
 function tblInsertImg(btn) {
   const wrap = btn.closest('.note-table-wrap');
   const cell = (wrap.contains(_lastFocusedCell) ? _lastFocusedCell : null)
@@ -2744,18 +2992,201 @@ document.addEventListener('DOMContentLoaded',()=>{
 
   // Delete/BackSpace 키로 선택된 표 삭제
   document.addEventListener('keydown', e => {
-    if (!_selectedTableWrap) return;
-    if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (e.key !== 'Delete' && e.key !== 'Backspace' && e.key !== 'Escape') return;
+
+    if (e.key === 'Escape') { deselectTable(); return; }
+
+    // 1) 선택된 표가 있으면 바로 삭제
+    if (_selectedTableWrap) {
       e.preventDefault();
       const prev = _selectedTableWrap.previousElementSibling;
       const next = _selectedTableWrap.nextElementSibling;
       _selectedTableWrap.remove();
       _selectedTableWrap = null;
+      hideTableContextToolbar();
       const target = prev || next;
       if (target && target.isContentEditable) { target.focus(); placeCursorAtEnd(target); }
       autoSave(); toast('표를 삭제했어요');
+      return;
     }
-    if (e.key === 'Escape') { deselectTable(); }
+
+    // 2) 커서가 표 경계에 있을 때
+    const active = document.activeElement;
+    if (!active || !active.isContentEditable) return;
+    if (active.nodeName === 'TD' || active.nodeName === 'TH') return; // 셀 안은 제외
+    const inPage = active.closest('.editor-page');
+    if (!inPage) return;
+
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return;
+
+    const range = sel.getRangeAt(0);
+    const body = active;
+
+    if (e.key === 'Backspace') {
+      // 커서가 현재 블록의 맨 앞인지 확인
+      const atStart = isCursorAtStart(range, body);
+      if (!atStart) return;
+      // body 안 커서 위치의 이전 형제에서 표 찾기
+      let node = range.startContainer;
+      // 현재 노드의 부모 중 body 직계 자식 찾기
+      while (node && node.parentNode !== body) node = node.parentNode;
+      const prevSib = node ? node.previousElementSibling : body.lastElementChild;
+      if (prevSib && prevSib.classList.contains('note-table-wrap')) {
+        e.preventDefault();
+        prevSib.remove();
+        hideTableContextToolbar();
+        autoSave(); toast('표를 삭제했어요');
+      }
+    }
+
+    if (e.key === 'Delete') {
+      // 커서가 현재 블록의 맨 끝인지 확인
+      const atEnd = isCursorAtEnd(range, body);
+      if (!atEnd) return;
+      let node = range.startContainer;
+      while (node && node.parentNode !== body) node = node.parentNode;
+      const nextSib = node ? node.nextElementSibling : body.firstElementChild;
+      if (nextSib && nextSib.classList.contains('note-table-wrap')) {
+        e.preventDefault();
+        nextSib.remove();
+        hideTableContextToolbar();
+        autoSave(); toast('표를 삭제했어요');
+      }
+    }
+  });
+
+  function isCursorAtStart(range, body) {
+    if (range.startOffset !== 0) return false;
+    let node = range.startContainer;
+    while (node && node !== body) {
+      if (node.previousSibling) return false;
+      node = node.parentNode;
+    }
+    return true;
+  }
+
+  function isCursorAtEnd(range, body) {
+    let node = range.startContainer;
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (range.startOffset < node.textContent.length) return false;
+    }
+    while (node && node !== body) {
+      if (node.nextSibling) return false;
+      node = node.parentNode;
+    }
+    return true;
+  }
+
+  // 페이지 경계 Delete / Backspace — 다음 페이지 내용을 현재 페이지로 병합
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+    if (e.ctrlKey || e.metaKey) return;
+
+    const active = document.activeElement;
+    if (!active || !active.isContentEditable) return;
+    if (active.nodeName === 'TD' || active.nodeName === 'TH') return;
+    const inPage = active.closest('.editor-page');
+    if (!inPage) return;
+
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const body = active;
+
+    const pages = Array.from(document.querySelectorAll('.editor-page'));
+    const curIdx = pages.indexOf(inPage);
+
+    if (e.key === 'Delete' && isCursorAtEnd(range, body)) {
+      // 커서가 현재 페이지 body 맨 끝 → 다음 페이지 내용 병합
+      if (curIdx >= pages.length - 1) return; // 마지막 페이지면 패스
+      const nextPage = pages[curIdx + 1];
+      const nextBody = nextPage.querySelector('[contenteditable]');
+      if (!nextBody) return;
+
+      // 다음 페이지 내용이 아예 비어있으면 그냥 페이지만 삭제
+      const nextEmpty = nextBody.textContent.trim() === '' && nextBody.querySelectorAll('table, img').length === 0;
+      if (nextEmpty) {
+        e.preventDefault();
+        nextPage.remove();
+        updatePageNumbers();
+        autoSave();
+        return;
+      }
+
+      e.preventDefault();
+      // 커서 위치 기억 (현재 body 끝)
+      const insertBefore = null; // body 끝에 추가
+
+      // 다음 페이지의 모든 자식을 현재 body로 이동
+      Array.from(nextBody.childNodes).forEach(node => {
+        body.appendChild(node.cloneNode(true));
+      });
+
+      // 이동된 표 이벤트 재연결
+      body.querySelectorAll('.note-table-wrap').forEach(wrap => {
+        const tbl = wrap.querySelector('.note-table');
+        if (tbl) { tbl.querySelectorAll('td,th').forEach(c=>c._ev=false); attachTableEvents(tbl); }
+        wrap.querySelectorAll('.tbl-resize-handle,.tbl-drag-handle').forEach(h=>h.remove());
+        addTableResizeHandle(wrap);
+        const dh = document.createElement('div');
+        dh.className='tbl-drag-handle'; dh.innerHTML='⠿ 표 이동'; dh.contentEditable='false';
+        wrap.appendChild(dh); attachTableDragHandle(dh, wrap);
+      });
+
+      nextPage.remove();
+      updatePageNumbers();
+
+      // 커서를 병합 지점(원래 body 끝이었던 곳)에 유지
+      // → 병합 직후 커서는 새로 붙은 내용 첫 노드 앞
+      // 이미 body 끝에 포커스가 있으므로 그대로 두면 됨
+      body.focus();
+      autoSave();
+      return;
+    }
+
+    if (e.key === 'Backspace' && isCursorAtStart(range, body)) {
+      // 커서가 현재 페이지 body 맨 앞 → 이전 페이지로 병합
+      if (curIdx === 0) return; // 첫 페이지면 패스
+      const prevPage = pages[curIdx - 1];
+      const prevBody = prevPage.querySelector('[contenteditable]');
+      if (!prevBody) return;
+
+      // 현재 페이지가 비어있으면 그냥 삭제
+      const curEmpty = body.textContent.trim() === '' && body.querySelectorAll('table, img').length === 0;
+      if (curEmpty) {
+        e.preventDefault();
+        inPage.remove();
+        updatePageNumbers();
+        prevBody.focus();
+        placeCursorAtEnd(prevBody);
+        autoSave();
+        return;
+      }
+
+      e.preventDefault();
+      // 현재 페이지의 모든 자식을 이전 페이지 body 끝에 이동
+      Array.from(body.childNodes).forEach(node => {
+        prevBody.appendChild(node.cloneNode(true));
+      });
+
+      // 이동된 표 이벤트 재연결
+      prevBody.querySelectorAll('.note-table-wrap').forEach(wrap => {
+        const tbl = wrap.querySelector('.note-table');
+        if (tbl) { tbl.querySelectorAll('td,th').forEach(c=>c._ev=false); attachTableEvents(tbl); }
+        wrap.querySelectorAll('.tbl-resize-handle,.tbl-drag-handle').forEach(h=>h.remove());
+        addTableResizeHandle(wrap);
+        const dh = document.createElement('div');
+        dh.className='tbl-drag-handle'; dh.innerHTML='⠿ 표 이동'; dh.contentEditable='false';
+        wrap.appendChild(dh); attachTableDragHandle(dh, wrap);
+      });
+
+      inPage.remove();
+      updatePageNumbers();
+      prevBody.focus();
+      placeCursorAtEnd(prevBody);
+      autoSave();
+    }
   });
 
   document.addEventListener('keydown', e => {
