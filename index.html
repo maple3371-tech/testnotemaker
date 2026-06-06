@@ -159,21 +159,130 @@ input.tool-color { width: 28px; height: 28px; border-radius: 6px; border: 1px so
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 24px;
-  min-height: 0;   /* flex child가 shrink되게 — 이게 없으면 넘침 */
-  -webkit-overflow-scrolling: touch; /* 모바일 스크롤 부드럽게 */
+  padding: 24px 24px 60px;
+  min-height: 0;
+  background: #e8e6e0;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  gap: 0;
+  position: relative;
 }
-#editor-paper { background: #fff; border-radius: 10px; box-shadow: 0 1px 12px rgba(0,0,0,0.06); padding: 36px 44px; min-height: 500px; max-width: 860px; margin: 0 auto; }
 
-/* ── UNIFIED EDITOR ── */
+/* 페이지 네비게이터 (오른쪽 고정) */
+#page-nav {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  width: 44px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 0;
+  order: 2;
+}
+.page-nav-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(255,255,255,0.7);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: var(--font-main);
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+}
+.page-nav-btn:hover { background: var(--accent); color: #fff; }
+.page-nav-btn.active { background: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(233,69,96,0.35); }
+/* 페이지 추가 버튼 */
+#page-nav-add {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  border: 1.5px dashed rgba(0,0,0,0.2);
+  background: transparent;
+  color: rgba(0,0,0,0.35);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+  margin-top: 2px;
+}
+#page-nav-add:hover { border-color: var(--accent); color: var(--accent); background: rgba(255,255,255,0.5); }
+
+#pages-container { flex: 1; order: 1; }
+
+/* A4 비율 페이지 분할 뷰 */
+/* A4: 210×297mm → 96dpi 기준 794×1123px, 패딩 빼면 내용 높이 약 1010px */
+:root {
+  --page-w: 794px;
+  --page-h: 1123px;
+  --page-pad-x: 60px;
+  --page-pad-y: 52px;
+}
+
+#editor-paper {
+  background: #fff;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.13);
+  width: var(--page-w);
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 0;
+  border-radius: 2px;
+  position: relative;
+}
+
+/* 페이지들을 쌓는 컨테이너 */
+#pages-container {
+  width: var(--page-w);
+  max-width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* 개별 A4 페이지 */
+.editor-page {
+  background: #fff;
+  width: var(--page-w);
+  max-width: 100%;
+  min-height: var(--page-h);
+  padding: var(--page-pad-y) var(--page-pad-x);
+  box-shadow: 0 2px 16px rgba(0,0,0,0.13);
+  border-radius: 2px;
+  margin-bottom: 20px;
+  position: relative;
+  box-sizing: border-box;
+}
+
+/* 페이지 번호 */
+.editor-page::after {
+  content: attr(data-page);
+  position: absolute;
+  bottom: 18px;
+  right: 28px;
+  font-size: 11px;
+  color: #bbb;
+  pointer-events: none;
+}
+
+/* 실제 편집 영역 */
 #editor-body {
   outline: none;
   font-size: 14.5px;
   line-height: 1.9;
   font-family: var(--font-main);
   color: var(--text);
-  min-height: 300px;
+  min-height: calc(var(--page-h) - var(--page-pad-y) * 2);
   word-break: break-word;
+  width: 100%;
 }
 #editor-body:empty:before { content: '여기에 내용을 입력하세요...'; color: #bbb; pointer-events: none; font-style: italic; }
 
@@ -420,10 +529,17 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
       </div>
     </div>
 
-    <!-- 페이퍼 (단일 에디터) -->
+    <!-- 페이퍼 (페이지 분할 뷰) -->
     <div id="editor-scroll">
-      <div id="editor-paper">
-        <div id="editor-body" contenteditable="true" spellcheck="false"></div>
+      <div id="pages-container">
+        <div class="editor-page" data-page="1">
+          <div id="editor-body" contenteditable="true" spellcheck="false"></div>
+        </div>
+      </div>
+      <!-- 페이지 네비게이터 -->
+      <div id="page-nav">
+        <div class="page-nav-btn active" data-target="0" onclick="goToPage(0)">1</div>
+        <button id="page-nav-add" onclick="addNewPage()" title="페이지 추가">＋</button>
       </div>
     </div>
 
@@ -469,7 +585,7 @@ function saveState() {
     if (note) {
       note.title = document.getElementById('editor-big-title').value;
       note.subject = document.getElementById('subject-select-editor').value;
-      note.html = document.getElementById('editor-body').innerHTML;
+      note.html = getAllHtml();
       note.updatedAt = Date.now();
     }
   }
@@ -616,19 +732,10 @@ function openNote(id) {
   document.getElementById('subject-select-editor').value = note.subject||'';
   document.getElementById('editor-date').textContent = new Date(note.updatedAt).toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric'});
   applySubjectColor(note.subject);
-  const body = document.getElementById('editor-body');
-  body.innerHTML = note.html||'';
-  // 저장된 표 이벤트 재연결
-  body.querySelectorAll('.note-table').forEach(tbl=>{
-    tbl.querySelectorAll('.col-resize-handle,.col-resize-overlay').forEach(h=>h.remove());
-    tbl.querySelectorAll('td,th').forEach(c=>{ c._ev=false; });
-    attachTableEvents(tbl);
-  });
-  body.querySelectorAll('.note-table-wrap').forEach(wrap=>{
-    wrap.querySelectorAll('.tbl-resize-handle').forEach(h=>h.remove());
-    addTableResizeHandle(wrap);
-  });
-  body.focus();
+  restorePages(note.html || '');
+  // 첫 번째 페이지 editor-body에 포커스
+  const firstBody = document.querySelector('.editor-page [contenteditable]');
+  if (firstBody) firstBody.focus();
 }
 
 function toggleSidebar() {
@@ -658,7 +765,12 @@ function backToList() {
 // ══════════════════════════════════════════
 //  INSERT ELEMENTS (커서 위치에 삽입)
 // ══════════════════════════════════════════
-function getEditorBody() { return document.getElementById('editor-body'); }
+function getEditorBody() {
+  // 현재 포커스된 페이지 body 반환, 없으면 첫 번째
+  const active = document.activeElement;
+  if (active && active.closest('.editor-page')) return active.closest('[contenteditable="true"]') || active;
+  return document.getElementById('editor-body') || document.querySelector('.editor-page [contenteditable]');
+}
 
 // 커서 복원 후 요소 삽입하는 헬퍼
 function insertNodeAtCursor(node) {
@@ -1034,8 +1146,165 @@ function initColResizeOverlay(tbl) {
 }
 
 // ══════════════════════════════════════════
-//  UNDO / REDO
+//  PAGE MANAGEMENT
 // ══════════════════════════════════════════
+const PAGE_H = 1123; // A4 px 높이 (96dpi)
+const PAGE_PAD_Y = 52; // 상하 패딩
+const PAGE_CONTENT_H = PAGE_H - PAGE_PAD_Y * 2; // 실제 내용 높이 ~1019px
+
+function checkAndSplitPages() {
+  const body = document.getElementById('editor-body');
+  if (!body) return;
+  const page = body.closest('.editor-page');
+  if (!page) return;
+
+  // 현재 페이지 내용이 넘치면 새 페이지 추가
+  if (body.scrollHeight > PAGE_CONTENT_H + 20) {
+    const container = document.getElementById('pages-container');
+    const pages = container.querySelectorAll('.editor-page');
+    const lastPage = pages[pages.length - 1];
+    const lastBody = lastPage.querySelector('[contenteditable]');
+
+    // 이미 다음 페이지가 있으면 패스, 없으면 추가
+    if (lastBody && lastBody.scrollHeight > PAGE_CONTENT_H + 20) {
+      addNewPage();
+    }
+  }
+  updatePageNumbers();
+}
+
+function addNewPage() {
+  const container = document.getElementById('pages-container');
+  const newPage = document.createElement('div');
+  newPage.className = 'editor-page';
+  const newBody = document.createElement('div');
+  newBody.contentEditable = 'true';
+  newBody.spellcheck = false;
+  newBody.style.cssText = 'outline:none;font-size:14.5px;line-height:1.9;font-family:var(--font-main);color:var(--text);min-height:' + PAGE_CONTENT_H + 'px;word-break:break-word;width:100%;';
+  newBody.addEventListener('input', onEditorInput);
+  newPage.appendChild(newBody);
+  container.appendChild(newPage);
+  updatePageNumbers();
+  newBody.focus();
+}
+
+function updatePageNumbers() {
+  document.querySelectorAll('.editor-page').forEach((p, i) => {
+    p.setAttribute('data-page', i + 1);
+  });
+  updatePageNav();
+}
+
+function updatePageNav() {
+  const nav = document.getElementById('page-nav');
+  if (!nav) return;
+  const addBtn = document.getElementById('page-nav-add');
+  const count = document.querySelectorAll('.editor-page').length;
+
+  // 기존 버튼 제거 (add 버튼 제외)
+  nav.querySelectorAll('.page-nav-btn').forEach(b => b.remove());
+
+  // 현재 보이는 페이지 인덱스 계산
+  const scroll = document.getElementById('editor-scroll');
+  const pages = document.querySelectorAll('.editor-page');
+  let activePage = 0;
+  pages.forEach((p, i) => {
+    const rect = p.getBoundingClientRect();
+    if (rect.top < window.innerHeight / 2) activePage = i;
+  });
+
+  for (let i = 0; i < count; i++) {
+    const btn = document.createElement('div');
+    btn.className = 'page-nav-btn' + (i === activePage ? ' active' : '');
+    btn.textContent = i + 1;
+    btn.dataset.target = i;
+    btn.onclick = () => goToPage(i);
+    nav.insertBefore(btn, addBtn);
+  }
+}
+
+function goToPage(idx) {
+  const pages = document.querySelectorAll('.editor-page');
+  if (!pages[idx]) return;
+  pages[idx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // 포커스
+  const body = pages[idx].querySelector('[contenteditable]');
+  if (body) { setTimeout(() => { body.focus(); placeCursorAtEnd(body); }, 300); }
+  // active 표시
+  document.querySelectorAll('.page-nav-btn').forEach((b, i) => {
+    b.classList.toggle('active', i === idx);
+  });
+}
+
+// 모든 페이지 body의 innerHTML을 합쳐서 저장
+function getAllHtml() {
+  const pages = document.querySelectorAll('.editor-page [contenteditable]');
+  return Array.from(pages).map(b => b.innerHTML).join('<hr class="page-break" style="border:none;margin:0;page-break-after:always;">');
+}
+
+// 저장된 HTML을 페이지별로 복원
+function restorePages(html) {
+  const container = document.getElementById('pages-container');
+  container.innerHTML = '';
+  const parts = html ? html.split(/<hr[^>]*class="page-break"[^>]*>/) : [''];
+  parts.forEach((part, i) => {
+    const page = document.createElement('div');
+    page.className = 'editor-page';
+    const body = document.createElement('div');
+    body.contentEditable = 'true';
+    body.spellcheck = false;
+    body.id = i === 0 ? 'editor-body' : '';
+    body.style.cssText = 'outline:none;font-size:14.5px;line-height:1.9;font-family:var(--font-main);color:var(--text);min-height:' + PAGE_CONTENT_H + 'px;word-break:break-word;width:100%;';
+    body.innerHTML = part || '';
+    body.addEventListener('input', onEditorInput);
+    page.appendChild(body);
+    container.appendChild(page);
+    // 표 이벤트 재연결
+    body.querySelectorAll('.note-table').forEach(tbl => {
+      tbl.querySelectorAll('.col-resize-overlay').forEach(h => h.remove());
+      tbl.querySelectorAll('td,th').forEach(c => c._ev = false);
+      attachTableEvents(tbl);
+    });
+    body.querySelectorAll('.note-table-wrap').forEach(wrap => {
+      wrap.querySelectorAll('.tbl-resize-handle').forEach(h => h.remove());
+      addTableResizeHandle(wrap);
+    });
+  });
+  updatePageNumbers();
+}
+
+// 에디터 input 공통 핸들러
+function onEditorInput(e) {
+  const body = e.target;
+  // ol/ul 클래스 유지
+  body.querySelectorAll('ol:not(.note-ol)').forEach(ol => ol.classList.add('note-ol'));
+  body.querySelectorAll('ul:not(.note-ul)').forEach(ul => ul.classList.add('note-ul'));
+  body.querySelectorAll('h1:not(.note-h1)').forEach(h => h.classList.add('note-h1'));
+  body.querySelectorAll('h2:not(.note-h2)').forEach(h => h.classList.add('note-h2'));
+  // 자동 변환
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0) {
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+    if (node.nodeType === Node.TEXT_NODE) {
+      const offset = range.startOffset;
+      const text = node.textContent;
+      const newText = text.replace(/<->/g,'↔').replace(/->/g,'→').replace(/<-/g,'←');
+      if (newText !== text) {
+        node.textContent = newText;
+        try {
+          const diff = text.length - newText.length;
+          const nr = document.createRange();
+          nr.setStart(node, Math.max(0, Math.min(offset - diff, newText.length)));
+          nr.collapse(true);
+          sel.removeAllRanges(); sel.addRange(nr);
+        } catch(err) {}
+      }
+    }
+  }
+  checkAndSplitPages();
+  autoSave();
+}
 function doUndo() {
   document.getElementById('editor-body').focus();
   document.execCommand('undo', false, null);
@@ -1473,49 +1742,106 @@ function makeSubjectExam() {
   saveExamAsPDF([...exams,...answerPages],(sub?.name||'과목')+'_시험지');
 }
 
-async function saveExamAsPDF(pages, filename) {
+// 시험지 HTML을 A4 크기 페이지 div 배열로 분할
+async function splitExamIntoPages(examHTML, containerW) {
+  // 임시 렌더 컨테이너
+  const wrap = document.createElement('div');
+  wrap.style.cssText = `position:fixed;left:-9999px;top:0;width:${containerW}px;background:#fff;padding:40px;box-sizing:border-box;z-index:-1;font-family:'Nanum Myeongjo',serif;line-height:2;`;
+  wrap.innerHTML = examHTML;
+  document.body.appendChild(wrap);
+  await new Promise(r => setTimeout(r, 100));
+
+  const PAGE_H_PX = containerW * (297 / 210); // A4 비율 높이
+  const PAD = 40;
+  const contentH = PAGE_H_PX - PAD * 2;
+
+  // 자식 요소들을 순서대로 페이지에 배분
+  const children = Array.from(wrap.children);
+  const pageDivs = [];
+  let curPage = null;
+  let curH = 0;
+
+  function newPage() {
+    curPage = document.createElement('div');
+    curPage.style.cssText = `width:${containerW}px;background:#fff;padding:${PAD}px;box-sizing:border-box;font-family:'Nanum Myeongjo',serif;line-height:2;min-height:${PAGE_H_PX}px;`;
+    pageDivs.push(curPage);
+    curH = 0;
+  }
+  newPage();
+
+  for (const child of children) {
+    const childH = child.getBoundingClientRect().height || child.offsetHeight || 40;
+    // 현재 페이지에 안 들어가면 새 페이지
+    if (curH + childH > contentH && curH > 0) {
+      newPage();
+    }
+    curPage.appendChild(child.cloneNode(true));
+    curH += childH + 8; // 8px 마진 여유
+  }
+
+  document.body.removeChild(wrap);
+  return pageDivs;
+}
+
+async function saveExamAsPDF(examHTMLList, filename) {
   const ld = document.getElementById('exam-loading'), msg = document.getElementById('exam-loading-msg');
   ld.classList.add('show');
   try {
     await new Promise(r => setTimeout(r, 50));
     const {jsPDF} = window.jspdf;
     const pdf = new jsPDF({orientation:'p', unit:'px', format:'a4'});
-    const pW = pdf.internal.pageSize.getWidth(), pH = pdf.internal.pageSize.getHeight();
-    for (let pi = 0; pi < pages.length; pi++) {
-      msg.textContent = `📄 PDF 생성 중... (${pi+1}/${pages.length})`;
-      const cont = document.createElement('div');
-      cont.style.cssText = 'position:fixed;left:-9999px;top:0;width:800px;background:#fff;z-index:-1;';
-      cont.innerHTML = pages[pi];
-      document.body.appendChild(cont);
-      await new Promise(r => setTimeout(r, 120));
-      const canvas = await html2canvas(cont, {
-        scale: 2, useCORS: true, allowTaint: true,
-        backgroundColor: '#ffffff', width: 800, windowWidth: 800, logging: false,
-        onclone: (doc) => {
-          doc.querySelectorAll('td, th').forEach(cell => {
-            const bg = cell.style.backgroundColor;
-            if (bg && bg !== 'transparent') cell.style.background = bg;
-          });
-          doc.querySelectorAll('mark').forEach(mark => {
-            const bg = mark.style.backgroundColor || '#fff176';
-            mark.style.background = bg;
-          });
-        }
+    const pW = pdf.internal.pageSize.getWidth();
+    const pH = pdf.internal.pageSize.getHeight();
+    const CONT_W = 794;
+    let firstPage = true;
+
+    const oncloneFix = (doc) => {
+      doc.querySelectorAll('td, th').forEach(cell => {
+        const bg = cell.style.backgroundColor;
+        if (bg && bg !== 'transparent') cell.style.background = bg;
       });
-      document.body.removeChild(cont);
-      const iW = canvas.width, iH = canvas.height, ratio = pW / iW;
-      let yPos = 0;
-      while (yPos < iH) {
-        const sH = Math.min(pH / ratio, iH - yPos);
-        const sc = document.createElement('canvas'); sc.width = iW; sc.height = sH;
-        const ctx = sc.getContext('2d');
-        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, iW, sH);
-        ctx.drawImage(canvas, 0, yPos, iW, sH, 0, 0, iW, sH);
-        if (pi > 0 || yPos > 0) pdf.addPage();
-        pdf.addImage(sc.toDataURL('image/png'), 'PNG', 0, 0, pW, sH * ratio);
-        yPos += sH;
+      doc.querySelectorAll('mark').forEach(mark => {
+        mark.style.background = mark.style.backgroundColor || '#fff176';
+      });
+    };
+
+    for (let ei = 0; ei < examHTMLList.length; ei++) {
+      msg.textContent = `📄 시험지 PDF 생성 중... (${ei+1}/${examHTMLList.length})`;
+      const pageDivs = await splitExamIntoPages(examHTMLList[ei], CONT_W);
+
+      for (let pi = 0; pi < pageDivs.length; pi++) {
+        msg.textContent = `📄 PDF 생성 중... (${ei+1}/${examHTMLList.length} — 페이지 ${pi+1}/${pageDivs.length})`;
+        const pageDiv = pageDivs[pi];
+        pageDiv.style.cssText += 'position:fixed;left:-9999px;top:0;z-index:-1;';
+        document.body.appendChild(pageDiv);
+        await new Promise(r => setTimeout(r, 80));
+
+        const canvas = await html2canvas(pageDiv, {
+          scale: 2, useCORS: true, allowTaint: true,
+          backgroundColor: '#ffffff',
+          width: CONT_W, windowWidth: CONT_W, logging: false,
+          onclone: oncloneFix
+        });
+        document.body.removeChild(pageDiv);
+
+        const iW = canvas.width, iH = canvas.height, ratio = pW / iW;
+        // 캡처된 높이가 A4보다 크면 자르되, 요소 단위 분할로 거의 안 잘림
+        let yPos = 0;
+        while (yPos < iH) {
+          const sH = Math.min(pH / ratio, iH - yPos);
+          const sc = document.createElement('canvas');
+          sc.width = iW; sc.height = sH;
+          const ctx = sc.getContext('2d');
+          ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, iW, sH);
+          ctx.drawImage(canvas, 0, yPos, iW, sH, 0, 0, iW, sH);
+          if (!firstPage) pdf.addPage();
+          firstPage = false;
+          pdf.addImage(sc.toDataURL('image/png'), 'PNG', 0, 0, pW, sH * ratio);
+          yPos += sH;
+        }
       }
     }
+
     pdf.save(filename.replace(/[\/\\?%*:|"<>]/g, '-') + '.pdf');
     toast('✅ PDF 저장됐어요!');
   } catch(err) { toast('PDF 오류: ' + err.message); console.error(err); }
@@ -1551,53 +1877,75 @@ function prepareForCapture(sourceEl) {
 }
 
 async function savePDF() {
-  toast('📄 PDF 생성 중...');
-  const paper = document.getElementById('editor-paper');
-  const clone = prepareForCapture(paper);
+  const ld = document.getElementById('exam-loading'), msg = document.getElementById('exam-loading-msg');
+  ld.classList.add('show');
+  msg.textContent = '📄 PDF 생성 중...';
   try {
-    await new Promise(r => setTimeout(r, 80)); // 렌더 대기
-    const canvas = await html2canvas(clone, {
-      scale: 2,
-      useCORS: true,
-      allowTaint: true,
-      backgroundColor: '#ffffff',
-      logging: false,
-      onclone: (doc) => {
-        // cloned doc 안에서도 배경색 재적용
-        doc.querySelectorAll('td, th').forEach(cell => {
-          const bg = cell.style.backgroundColor;
-          if (bg && bg !== 'transparent') cell.style.background = bg;
-        });
-        doc.querySelectorAll('mark').forEach(mark => {
-          const bg = mark.style.backgroundColor || '#fff176';
-          mark.style.background = bg;
-        });
-      }
-    });
-    document.body.removeChild(clone);
+    await new Promise(r => setTimeout(r, 50));
     const {jsPDF} = window.jspdf;
     const pdf = new jsPDF({orientation:'p', unit:'px', format:'a4'});
-    const pW = pdf.internal.pageSize.getWidth(), pH = pdf.internal.pageSize.getHeight();
-    const iW = canvas.width, iH = canvas.height, ratio = pW / iW;
-    let yPos = 0;
-    while (yPos < iH) {
-      const sH = Math.min(pH / ratio, iH - yPos);
-      const sc = document.createElement('canvas'); sc.width = iW; sc.height = sH;
-      const ctx = sc.getContext('2d');
-      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, iW, sH);
-      ctx.drawImage(canvas, 0, yPos, iW, sH, 0, 0, iW, sH);
-      if (yPos > 0) pdf.addPage();
-      pdf.addImage(sc.toDataURL('image/png'), 'PNG', 0, 0, pW, sH * ratio);
-      yPos += sH;
+    const pW = pdf.internal.pageSize.getWidth();
+    const pH = pdf.internal.pageSize.getHeight();
+    const pages = document.querySelectorAll('.editor-page');
+    const oncloneFix = (doc) => {
+      doc.querySelectorAll('td, th').forEach(cell => {
+        const bg = cell.style.backgroundColor;
+        if (bg && bg !== 'transparent') cell.style.background = bg;
+      });
+      doc.querySelectorAll('mark').forEach(mark => {
+        mark.style.background = mark.style.backgroundColor || '#fff176';
+      });
+      doc.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+      doc.querySelectorAll('.table-toolbar,.col-resize-overlay,.tbl-resize-handle,.selected-cell').forEach(el => {
+        if (el.classList.contains('selected-cell')) el.classList.remove('selected-cell');
+        else el.remove();
+      });
+      // 페이지 번호 숨기기 (after 가상요소는 캡처에 포함되므로 data-page 제거)
+      doc.querySelectorAll('.editor-page').forEach(p => p.removeAttribute('data-page'));
+    };
+
+    for (let i = 0; i < pages.length; i++) {
+      msg.textContent = `📄 PDF 생성 중... (${i+1}/${pages.length})`;
+      const page = pages[i];
+
+      // 페이지 clone을 고정 너비로 렌더
+      const clone = page.cloneNode(true);
+      clone.style.cssText = `position:fixed;left:-9999px;top:0;width:794px;min-height:1123px;background:#fff;padding:52px 60px;box-sizing:border-box;z-index:-1;`;
+      document.body.appendChild(clone);
+      await new Promise(r => setTimeout(r, 80));
+
+      const canvas = await html2canvas(clone, {
+        scale: 2, useCORS: true, allowTaint: true,
+        backgroundColor: '#ffffff',
+        width: 794, windowWidth: 794, logging: false,
+        onclone: oncloneFix
+      });
+      document.body.removeChild(clone);
+
+      const iW = canvas.width, iH = canvas.height;
+      const ratio = pW / iW;
+      // 한 페이지가 A4보다 길면 잘라서 여러 PDF 페이지에
+      let yPos = 0;
+      while (yPos < iH) {
+        const sliceH = Math.min(pH / ratio, iH - yPos);
+        const sc = document.createElement('canvas');
+        sc.width = iW; sc.height = sliceH;
+        const ctx = sc.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, iW, sliceH);
+        ctx.drawImage(canvas, 0, yPos, iW, sliceH, 0, 0, iW, sliceH);
+        if (i > 0 || yPos > 0) pdf.addPage();
+        pdf.addImage(sc.toDataURL('image/png'), 'PNG', 0, 0, pW, sliceH * ratio);
+        yPos += sliceH;
+      }
     }
     const title = (document.getElementById('editor-big-title').value || '노트').replace(/[\/\\?%*:|"<>]/g, '-');
     pdf.save(title + '.pdf');
     toast('✅ PDF 저장됐어요!');
   } catch(err) {
-    if (document.body.contains(clone)) document.body.removeChild(clone);
     toast('PDF 오류: ' + err.message);
     console.error(err);
   }
+  ld.classList.remove('show');
 }
 
 // ══════════════════════════════════════════
@@ -1628,43 +1976,22 @@ function buildHighlightSwatches() {
 document.addEventListener('DOMContentLoaded',()=>{
   loadState(); buildHighlightSwatches(); renderSidebar(); renderNotesList();
 
-  const body=document.getElementById('editor-body');
-  body.addEventListener('input', e => {
-    // ol/ul 에 클래스 유지
-    body.querySelectorAll('ol:not(.note-ol)').forEach(ol=>ol.classList.add('note-ol'));
-    body.querySelectorAll('ul:not(.note-ul)').forEach(ul=>ul.classList.add('note-ul'));
-    body.querySelectorAll('h1:not(.note-h1)').forEach(h=>h.classList.add('note-h1'));
-    body.querySelectorAll('h2:not(.note-h2)').forEach(h=>h.classList.add('note-h2'));
+  // 첫 페이지 body에 input 핸들러 연결
+  const firstBody = document.getElementById('editor-body');
+  if (firstBody) firstBody.addEventListener('input', onEditorInput);
 
-    // 자동 변환 규칙
-    // 순서 중요: <-> 를 <- 보다 먼저 처리
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) { autoSave(); return; }
-    const range = sel.getRangeAt(0);
-    const node = range.startContainer;
-    if (node.nodeType === Node.TEXT_NODE) {
-      const offset = range.startOffset;
-      let text = node.textContent;
-      let newText = text
-        .replace(/<->/g, '↔')
-        .replace(/->/g,  '→')
-        .replace(/<-/g,  '←');
-      if (newText !== text) {
-        node.textContent = newText;
-        try {
-          // 교체로 줄어든 글자 수만큼 커서 보정
-          const diff = text.length - newText.length;
-          const newOffset = Math.max(0, Math.min(offset - diff, newText.length));
-          const nr = document.createRange();
-          nr.setStart(node, newOffset);
-          nr.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(nr);
-        } catch(err) {}
-      }
-    }
-
-    autoSave();
+  // 스크롤 시 페이지 네비 active 업데이트
+  document.getElementById('editor-scroll')?.addEventListener('scroll', () => {
+    const pages = document.querySelectorAll('.editor-page');
+    const scrollEl = document.getElementById('editor-scroll');
+    const scrollMid = scrollEl.scrollTop + scrollEl.clientHeight / 2;
+    let activePage = 0;
+    pages.forEach((p, i) => {
+      if (p.offsetTop <= scrollMid) activePage = i;
+    });
+    document.querySelectorAll('.page-nav-btn').forEach((b, i) => {
+      b.classList.toggle('active', i === activePage);
+    });
   });
 
   // Ctrl+S 저장, Ctrl+Z undo, Ctrl+Y redo, Shift+8 → ×
