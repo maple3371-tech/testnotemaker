@@ -227,18 +227,18 @@ input.tool-color { width: 28px; height: 28px; border-radius: 6px; border: 1px so
   word-break: break-word;
   width: 100%;
 }
-#editor-body:empty:before { content: '여기에 내용을 입력하세요...'; color: #bbb; pointer-events: none; font-style: italic; }
+.editor-page [contenteditable]:empty:before { content: '여기에 내용을 입력하세요...'; color: #bbb; pointer-events: none; font-style: italic; }
 
-/* 에디터 내부 삽입 요소 스타일 */
-#editor-body h1.note-h1 { font-size: 20px; font-weight: 800; color: var(--accent2); border-bottom: 2.5px solid var(--accent2); padding: 4px 0; margin: 10px 0 4px; }
-#editor-body h2.note-h2 { font-size: 16px; font-weight: 700; color: #1a1a2e; border-left: 4px solid var(--accent); padding: 3px 10px; margin: 8px 0 2px; }
-#editor-body p { margin: 2px 0; min-height: 1.9em; }
-#editor-body ol.note-ol { padding-left: 26px; margin: 4px 0; }
-#editor-body ol.note-ol li { line-height: 1.9; padding: 1px 0; }
-#editor-body ol.note-ol li::marker { color: var(--accent); font-weight: 700; }
-#editor-body ul.note-ul { padding-left: 22px; margin: 4px 0; list-style: disc; }
-#editor-body ul.note-ul li { line-height: 1.9; }
-#editor-body ul.note-ul li::marker { color: var(--accent); }
+/* 에디터 내부 삽입 요소 스타일 — 모든 페이지에 적용 */
+.editor-page h1.note-h1 { font-size: 20px; font-weight: 800; color: var(--accent2); border-bottom: 2.5px solid var(--accent2); padding: 4px 0; margin: 10px 0 4px; }
+.editor-page h2.note-h2 { font-size: 16px; font-weight: 700; color: #1a1a2e; border-left: 4px solid var(--accent); padding: 3px 10px; margin: 8px 0 2px; }
+.editor-page p { margin: 2px 0; min-height: 1.9em; }
+.editor-page ol.note-ol { padding-left: 26px; margin: 4px 0; }
+.editor-page ol.note-ol li { line-height: 1.9; padding: 1px 0; }
+.editor-page ol.note-ol li::marker { color: var(--accent); font-weight: 700; }
+.editor-page ul.note-ul { padding-left: 22px; margin: 4px 0; list-style: disc; }
+.editor-page ul.note-ul li { line-height: 1.9; }
+.editor-page ul.note-ul li::marker { color: var(--accent); }
 
 /* 표 */
 .note-table-wrap {
