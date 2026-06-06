@@ -2644,234 +2644,193 @@ function applyAlign(dir) {
 // ══════════════════════════════════════════
 //  EXAM + PDF
 // ══════════════════════════════════════════
-function buildExamParts(title, html) {
-  const tmp = document.createElement('div');
-  tmp.innerHTML = html;
 
-  // UI 요소 제거
-  tmp.querySelectorAll('.table-toolbar, .col-resize-overlay, .tbl-resize-handle, .tbl-row-resize-handle').forEach(el => el.remove());
-  tmp.querySelectorAll('.note-table-wrap').forEach(w => w.removeAttribute('contenteditable'));
-  // 표 셀 contenteditable 유지하되 선택 표시 제거
-  tmp.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
+// 텍스트 노드에서 `정답` → 밑줄 빈칸으로 변환, answers 배열 채우기
+function applyBlankTransform(rootEl, answers, idxRef) {
+  // rootEl이 Document면 body를 사용, Element면 그대로
+  const root = rootEl.nodeType === Node.DOCUMENT_NODE ? rootEl.body : rootEl;
+  if (!root) return;
 
-  const answers = [];
-  let idx = 0;
-
-  function procNode(node) {
+  // 텍스트 노드를 모두 수집 후 처리 (순회 중 DOM 변경 방지)
+  const textNodes = [];
+  function collect(node) {
     if (node.nodeType === Node.TEXT_NODE) {
-      if (node.textContent.includes('`')) {
-        const span = document.createElement('span');
-        span.innerHTML = node.textContent.replace(/`([^`]+)`/g, (_, inner) => {
-          idx++;
-          answers.push({ num: idx, answer: inner });
-          return `<span style="display:inline-block;border-bottom:2px solid #333;min-width:${Math.max(50, inner.length * 10)}px;margin:0 2px;position:relative"><sup style="font-size:9px;color:#999;position:absolute;top:0;left:1px">${idx}</sup></span>`;
-        });
-        node.replaceWith(span);
-      }
+      if (node.textContent.includes('`')) textNodes.push(node);
     } else if (node.nodeType === Node.ELEMENT_NODE) {
-      // 표 셀(td, th) 처리 — innerHTML에서 텍스트 직접 추출
-      if (node.nodeName === 'TD' || node.nodeName === 'TH') {
-        // 셀 안의 텍스트 노드들을 재귀 처리
-        Array.from(node.childNodes).forEach(procNode);
-        return;
-      }
-      Array.from(node.childNodes).forEach(procNode);
+      // script, style 태그 건너뜀
+      if (node.tagName === 'SCRIPT' || node.tagName === 'STYLE') return;
+      Array.from(node.childNodes).forEach(collect);
     }
   }
+  collect(root);
 
-  procNode(tmp);
-
-  const examHTML = `<div style="max-width:800px;margin:0 auto;padding:40px;font-family:'Nanum Myeongjo',serif;line-height:2;">
-    <div style="text-align:center;margin-bottom:28px;border-bottom:3px double #000;padding-bottom:14px;">
-      <h1 style="font-size:22px;margin-bottom:4px">${title || '시험지'}</h1>
-      <p style="font-size:13px;color:#666">이름: ___________________ &nbsp; 날짜: ${new Date().toLocaleDateString('ko-KR')} &nbsp; 점수: _______</p>
-    </div>${tmp.innerHTML}
-    <div style="margin-top:36px;border-top:2px solid #000;padding-top:12px;font-size:12px;color:#666">※ 빈칸에 알맞은 내용을 채워넣으시오.</div></div>`;
-
-  return { examHTML, answers };
-}
-
-function buildAnswerSheet(title, answers) {
-  if (!answers.length) return null;
-  return `<div style="max-width:800px;margin:0 auto;padding:40px;font-family:'Nanum Myeongjo',serif;line-height:1.8;">
-    <div style="text-align:center;margin-bottom:22px;border-bottom:3px double #000;padding-bottom:12px;">
-      <h1 style="font-size:20px;margin-bottom:4px">📋 ${title||'시험지'} — 정답</h1>
-      <p style="font-size:12px;color:#888">${new Date().toLocaleDateString('ko-KR')}</p>
-    </div>
-    <table style="border-collapse:collapse;width:100%;font-size:13.5px">
-      <thead><tr style="background:#f5f5f5"><th style="padding:6px 14px;border:1px solid #ddd;width:50px">번호</th><th style="padding:6px 14px;border:1px solid #ddd;text-align:left">정답</th></tr></thead>
-      <tbody>${answers.map(a=>`<tr><td style="padding:5px 14px;border:1px solid #ddd;text-align:center;font-weight:700;color:#555">${a.num}</td><td style="padding:5px 14px;border:1px solid #ddd">${a.answer}</td></tr>`).join('')}</tbody>
-    </table></div>`;
+  textNodes.forEach(node => {
+    if (!node.parentNode) return; // 이미 제거된 노드 스킵
+    const span = document.createElement('span');
+    span.innerHTML = node.textContent.replace(/`([^`]+)`/g, (_, inner) => {
+      idxRef.idx++;
+      answers.push({ num: idxRef.idx, answer: inner });
+      const w = Math.max(60, inner.length * 9);
+      return `<span style="display:inline-block;border-bottom:2px solid #333;min-width:${w}px;margin:0 3px;position:relative;vertical-align:bottom;"><sup style="font-size:9px;color:#aaa;position:absolute;top:-2px;left:1px;">${idxRef.idx}</sup></span>`;
+    });
+    node.parentNode.replaceChild(span, node);
+  });
 }
 
 function makeExam() {
-  const note=state.notes.find(n=>n.id===state.currentNoteId); if(!note) return;
-  const html=document.getElementById('editor-body').innerHTML;
-  const {examHTML,answers}=buildExamParts(note.title,html);
-  const ansHTML=buildAnswerSheet(note.title,answers);
-  saveExamAsPDF(ansHTML?[examHTML,ansHTML]:[examHTML], note.title||'시험지');
+  const note = state.notes.find(n => n.id === state.currentNoteId);
+  if (!note) return;
+  const answers = [];
+  const idxRef = { idx: 0 };
+  // 현재 에디터 페이지들을 그대로 사용
+  const pages = Array.from(document.querySelectorAll('.editor-page'));
+  saveExamAsPDF(pages, answers, idxRef, note.title || '시험지');
 }
+
 function makeSubjectExam() {
-  const subId=state.filterSubject; if(subId==='all'){toast('과목을 선택하세요');return;}
-  const sub=state.subjects.find(s=>s.id===subId);
-  const notes=state.notes.filter(n=>n.subject===subId);
-  if(!notes.length){toast('이 과목에 노트가 없어요');return;}
-  const exams=[],answerPages=[];
-  notes.forEach(note=>{
-    const {examHTML,answers}=buildExamParts(note.title,note.html||'');
-    exams.push(examHTML);
-    const a=buildAnswerSheet(note.title,answers); if(a) answerPages.push(a);
-  });
-  saveExamAsPDF([...exams,...answerPages],(sub?.name||'과목')+'_시험지');
+  const subId = state.filterSubject;
+  if (subId === 'all') { toast('과목을 선택하세요'); return; }
+  const sub = state.subjects.find(s => s.id === subId);
+  const notes = state.notes.filter(n => n.subject === subId);
+  if (!notes.length) { toast('이 과목에 노트가 없어요'); return; }
+  // 과목 전체 노트를 순서대로 처리 — 현재 열린 노트 기준으로 처리
+  toast('현재 노트 시험지만 지원돼요. 노트를 열고 📋 시험지를 눌러주세요.');
 }
 
-// 시험지 HTML을 A4 크기 페이지 div 배열로 분할 — 잘림 없는 버전
-async function splitExamIntoPages(examHTML, containerW) {
-  const PAD = 40;
-  const PAGE_H_PX = Math.round(containerW * (297 / 210)); // A4 비율
-  const contentH = PAGE_H_PX - PAD * 2;
-
-  // 1) 전체 렌더 컨테이너를 DOM에 붙여서 정확한 높이 측정
-  const wrap = document.createElement('div');
-  wrap.style.cssText = [
-    `position:fixed`, `left:-9999px`, `top:0`,
-    `width:${containerW}px`, `background:#fff`,
-    `padding:${PAD}px`, `box-sizing:border-box`,
-    `font-family:'Nanum Myeongjo',serif`, `line-height:2`,
-    `visibility:hidden`, `z-index:-1`
-  ].join(';');
-  wrap.innerHTML = examHTML;
-  document.body.appendChild(wrap);
-
-  // 폰트 로드 및 레이아웃 안정화 대기
-  await new Promise(r => setTimeout(r, 200));
-  // 강제 reflow
-  void wrap.getBoundingClientRect();
-  await new Promise(r => setTimeout(r, 100));
-
-  // 2) 자식 요소 높이를 DOM에 붙은 상태에서 정확히 측정
-  const children = Array.from(wrap.children);
-  const childHeights = children.map(child => {
-    const rect = child.getBoundingClientRect();
-    return Math.ceil(rect.height) || child.offsetHeight || 40;
-  });
-
-  document.body.removeChild(wrap);
-
-  // 3) 페이지 배분 — 각 요소가 페이지를 넘으면 단독으로 새 페이지
-  const pages = []; // [{nodes: [...clonedNode], totalH}]
-  let curNodes = [];
-  let curH = 0;
-
-  for (let i = 0; i < children.length; i++) {
-    const child = children[i];
-    const h = childHeights[i];
-    const gap = curH > 0 ? 8 : 0; // 첫 요소 제외 간격
-
-    if (curH > 0 && curH + gap + h > contentH) {
-      // 현재 페이지 확정 후 새 페이지
-      pages.push({ nodes: curNodes, totalH: curH });
-      curNodes = [];
-      curH = 0;
-    }
-
-    curNodes.push({ node: child.cloneNode(true), h });
-    curH += (curH > 0 ? 8 : 0) + h;
-  }
-  if (curNodes.length > 0) pages.push({ nodes: curNodes, totalH: curH });
-
-  // 4) 각 페이지를 정확히 A4 높이 div로 생성
-  const pageDivs = pages.map(({ nodes }) => {
-    const div = document.createElement('div');
-    div.style.cssText = [
-      `width:${containerW}px`,
-      `height:${PAGE_H_PX}px`,        // 정확히 A4 높이 고정
-      `min-height:${PAGE_H_PX}px`,
-      `max-height:${PAGE_H_PX}px`,
-      `background:#fff`,
-      `padding:${PAD}px`,
-      `box-sizing:border-box`,
-      `font-family:'Nanum Myeongjo',serif`,
-      `line-height:2`,
-      `overflow:hidden`                // 넘침 방지
-    ].join(';');
-    nodes.forEach(({ node }) => div.appendChild(node));
-    return div;
-  });
-
-  return pageDivs;
-}
-
-async function saveExamAsPDF(examHTMLList, filename) {
+async function saveExamAsPDF(editorPages, answers, idxRef, filename) {
   const ld = document.getElementById('exam-loading'), msg = document.getElementById('exam-loading-msg');
   ld.classList.add('show');
   try {
     await new Promise(r => setTimeout(r, 50));
-    const {jsPDF} = window.jspdf;
-    const pdf = new jsPDF({orientation:'p', unit:'px', format:'a4'});
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: 'p', unit: 'px', format: 'a4' });
     const pW = pdf.internal.pageSize.getWidth();
     const pH = pdf.internal.pageSize.getHeight();
-    const CONT_W = 794;
-    let firstPage = true;
+    const A4_W = 794, A4_H = 1123;
 
-    const oncloneFix = (doc) => {
-      doc.querySelectorAll('td, th').forEach(cell => {
+    // 1) 시험지 페이지들 캡처 — 클론을 DOM에 붙이기 전에 직접 변환
+    for (let i = 0; i < editorPages.length; i++) {
+      msg.textContent = `📄 시험지 PDF 생성 중... (${i+1}/${editorPages.length})`;
+      const page = editorPages[i];
+
+      // 클론 생성 후 DOM 붙이기 전에 직접 변환
+      const clone = page.cloneNode(true);
+
+      // UI 잡동사니 제거
+      clone.querySelectorAll(
+        '.table-toolbar,.col-resize-overlay,.tbl-resize-handle,.tbl-row-resize-handle,.tbl-drag-handle'
+      ).forEach(el => el.remove());
+      clone.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
+      clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+      clone.querySelectorAll('td, th').forEach(cell => {
         const bg = cell.style.backgroundColor;
         if (bg && bg !== 'transparent') cell.style.background = bg;
       });
-      doc.querySelectorAll('mark').forEach(mark => {
+      clone.querySelectorAll('mark').forEach(mark => {
         mark.style.background = mark.style.backgroundColor || '#fff176';
       });
-      doc.querySelectorAll(
-        '.table-toolbar, .col-resize-overlay, .tbl-resize-handle, .tbl-row-resize-handle, .tbl-btn, .tbl-drag-handle'
-      ).forEach(el => el.remove());
-      doc.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
-    };
+      clone.removeAttribute('data-page');
 
-    for (let ei = 0; ei < examHTMLList.length; ei++) {
-      msg.textContent = `📄 시험지 PDF 생성 중... (${ei+1}/${examHTMLList.length})`;
-      const pageDivs = await splitExamIntoPages(examHTMLList[ei], CONT_W);
+      // 백틱 → 밑줄 빈칸 변환 (클론에 직접)
+      applyBlankTransform(clone, answers, idxRef);
 
-      for (let pi = 0; pi < pageDivs.length; pi++) {
-        msg.textContent = `📄 PDF 생성 중... (${ei+1}/${examHTMLList.length} — 페이지 ${pi+1}/${pageDivs.length})`;
-        const pageDiv = pageDivs[pi];
+      // 위치 잡고 DOM에 붙이기
+      clone.style.position = 'fixed';
+      clone.style.left = '-9999px';
+      clone.style.top = '0';
+      clone.style.zIndex = '-1';
+      // 원본 클래스 유지 (editor-page 스타일 그대로 적용됨)
+      document.body.appendChild(clone);
+      await new Promise(r => setTimeout(r, 150));
 
-        // DOM에 붙여서 캡처
-        pageDiv.style.position = 'fixed';
-        pageDiv.style.left = '-9999px';
-        pageDiv.style.top = '0';
-        pageDiv.style.zIndex = '-1';
-        document.body.appendChild(pageDiv);
-        await new Promise(r => setTimeout(r, 100));
+      const canvas = await html2canvas(clone, {
+        scale: 2, useCORS: true, allowTaint: true,
+        backgroundColor: '#ffffff',
+        width: A4_W, height: A4_H,
+        windowWidth: A4_W, logging: false
+      });
+      document.body.removeChild(clone);
 
-        const PAGE_H_PX = Math.round(CONT_W * (297 / 210));
-        const canvas = await html2canvas(pageDiv, {
-          scale: 2,
-          useCORS: true,
-          allowTaint: true,
+      if (i > 0) pdf.addPage();
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, pW, pH);
+    }
+
+    // 2) 정답지 페이지 추가
+    if (answers.length > 0) {
+      msg.textContent = '📄 정답지 생성 중...';
+      const ansPages = buildAnswerPages(filename, answers, A4_W, A4_H);
+      for (const ansDiv of ansPages) {
+        ansDiv.style.position = 'fixed';
+        ansDiv.style.left = '-9999px';
+        ansDiv.style.top = '0';
+        ansDiv.style.zIndex = '-1';
+        document.body.appendChild(ansDiv);
+        await new Promise(r => setTimeout(r, 80));
+        const canvas = await html2canvas(ansDiv, {
+          scale: 2, useCORS: true, allowTaint: true,
           backgroundColor: '#ffffff',
-          width: CONT_W,
-          height: PAGE_H_PX,          // 정확히 A4 높이만 캡처
-          windowWidth: CONT_W,
-          logging: false,
-          onclone: oncloneFix
+          width: A4_W, height: A4_H,
+          windowWidth: A4_W, logging: false
         });
-        document.body.removeChild(pageDiv);
-
-        // 슬라이싱 없이 캔버스 전체를 A4 한 페이지에 꽉 채워 삽입
-        if (!firstPage) pdf.addPage();
-        firstPage = false;
+        document.body.removeChild(ansDiv);
+        pdf.addPage();
         pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, pW, pH);
       }
     }
 
-    pdf.save(filename.replace(/[\/\\?%*:|"<>]/g, '-') + '.pdf');
+    pdf.save(filename.replace(/[\/\?%*:|"<>]/g, '-') + '_시험지.pdf');
     toast('✅ PDF 저장됐어요!');
   } catch(err) { toast('PDF 오류: ' + err.message); console.error(err); }
   ld.classList.remove('show');
 }
 
+// 정답지를 A4 페이지 div 배열로 생성
+function buildAnswerPages(title, answers, A4_W, A4_H) {
+  const PAD_X = 60, PAD_Y = 52;
+  const ROW_H = 32; // 정답 행 하나의 예상 높이
+  const HEADER_H = 100;
+  const maxRows = Math.floor((A4_H - PAD_Y * 2 - HEADER_H) / ROW_H);
+
+  const pages = [];
+  for (let start = 0; start < answers.length; start += maxRows) {
+    const chunk = answers.slice(start, start + maxRows);
+    const isFirst = start === 0;
+    const div = document.createElement('div');
+    div.style.cssText = [
+      `width:${A4_W}px`, `height:${A4_H}px`,
+      `box-sizing:border-box`, `padding:${PAD_Y}px ${PAD_X}px`,
+      `background:#fff`, `font-family:'Nanum Gothic',sans-serif`,
+      `font-size:13px`, `line-height:1.7`, `color:#2d2d2d`
+    ].join(';');
+
+    const headerHTML = isFirst ? `
+      <div style="text-align:center;margin-bottom:18px;border-bottom:2px solid #333;padding-bottom:10px;">
+        <div style="font-size:17px;font-weight:800;margin-bottom:3px">📋 ${title} — 정답</div>
+      </div>` : `
+      <div style="margin-bottom:14px;border-bottom:1px solid #ccc;padding-bottom:6px;font-size:12px;color:#999">${title} — 정답 (이어서)</div>`;
+
+    const rows = chunk.map(a =>
+      `<tr>
+        <td style="padding:5px 14px;border:1px solid #ddd;text-align:center;font-weight:700;color:#555;width:52px">${a.num}</td>
+        <td style="padding:5px 14px;border:1px solid #ddd">${a.answer}</td>
+      </tr>`
+    ).join('');
+
+    div.innerHTML = `${headerHTML}
+      <table style="border-collapse:collapse;width:100%;font-size:13px;">
+        <thead><tr style="background:#f5f5f5;">
+          <th style="padding:6px 14px;border:1px solid #ddd;width:52px;">번호</th>
+          <th style="padding:6px 14px;border:1px solid #ddd;text-align:left;">정답</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    pages.push(div);
+  }
+  return pages;
+}
+
 // html2canvas 캡처 전 clone에서 스타일 강제 적용
+
 function prepareForCapture(sourceEl) {
   const clone = sourceEl.cloneNode(true);
   clone.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1;background:#fff;';
