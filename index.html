@@ -3184,7 +3184,11 @@ document.addEventListener('DOMContentLoaded',()=>{
 
     // Shift+8 → · 가운데 점, Ctrl+8 → × 곱하기
     const active = document.activeElement;
-    const inEditor = active && (active.closest('.editor-page') || active.closest('.note-table-wrap'));
+    const inEditor = active && (
+      active.id === 'editor-body' ||
+      document.getElementById('editor-body')?.contains(active) ||
+      active.closest('.note-table-wrap')
+    );
     if (inEditor && !e.metaKey) {
       if (e.shiftKey && !e.ctrlKey && e.code==='Digit8') {
         e.preventDefault();
