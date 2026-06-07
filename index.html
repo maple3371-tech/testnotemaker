@@ -3190,12 +3190,24 @@ document.addEventListener('DOMContentLoaded',()=>{
       active.closest('.note-table-wrap')
     );
     if (inEditor && !e.metaKey) {
-      if (e.shiftKey && !e.ctrlKey && e.code==='Digit8') {
+      if ((e.shiftKey && !e.ctrlKey && e.code==='Digit8') ||
+          (e.ctrlKey && !e.shiftKey && e.code==='Digit8')) {
         e.preventDefault();
-        document.execCommand('insertText', false, '·');
-      } else if (e.ctrlKey && !e.shiftKey && e.code==='Digit8') {
-        e.preventDefault();
-        document.execCommand('insertText', false, '×');
+        e.stopPropagation();
+        const char = e.shiftKey ? '·' : '×';
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          const textNode = document.createTextNode(char);
+          range.insertNode(textNode);
+          range.setStartAfter(textNode);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          // input 이벤트 수동 발생 (autoSave 등 처리)
+          active.dispatchEvent(new Event('input', {bubbles:true}));
+        }
       }
     }
   });
